@@ -2,11 +2,10 @@
 (() => {
 'use strict';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
-const LS_INSTALL = 'patience.installHidden';
 
 /* ================= Storage helpers ================= */
 function load(key, fallback) {
@@ -461,16 +460,106 @@ let L = {}; // layout metrics
 
 function speedMs() { return { langzaam: 380, normaal: 220, snel: 120, uit: 0 }[S.speed] ?? 220; }
 
-const suitSvg = (s, cls) => `<svg class="${cls}" viewBox="0 0 100 100"><use href="#suit${s}"/></svg>`;
-function faceHtml(id) {
-  const r = rankOf(id), s = suitOf(id), t = rankText(r);
-  let center;
-  if (r >= 11) {
-    const crown = r === 13 ? 'crownK' : r === 12 ? 'crownQ' : 'crownJ';
-    center = `<div class="court"><svg class="crown" viewBox="0 0 100 70"><use href="#${crown}"/></svg>${suitSvg(s, 'csuit')}</div>`;
-  } else center = suitSvg(s, 'pip');
-  return `<div class="idx${t.length > 1 ? ' ten' : ''}">${t}</div>${suitSvg(s, 'si')}${center}`;
+/* ---------- Card faces: traditional deck, drawn as self-contained SVG ---------- */
+const SUITP = [
+  'M50 3C41 20 6 37 6 60c0 14 11 23 23 23 8 0 14-4 18-9-1 9-6 16-14 21h34c-8-5-13-12-14-21 4 5 10 9 18 9 12 0 23-9 23-23C94 37 59 20 50 3z',
+  'M50 92C21 68 4 51 4 31 4 16 15 6 29 6c10 0 17 6 21 14 4-8 11-14 21-14 14 0 25 10 25 25 0 20-17 37-46 61z',
+  'M50 3 87 50 50 97 13 50z',
+  'M50 6a21 21 0 1 1 0 42 21 21 0 1 1 0-42zM27 37a21 21 0 1 1 0 42 21 21 0 1 1 0-42zM73 37a21 21 0 1 1 0 42 21 21 0 1 1 0-42zM42 40h16v18H42zM47 56c-1 17-6 29-14 39h34c-8-10-13-22-14-39z'
+];
+const RED = '#c8102e', BLK = '#161616', GOLD = '#e9b824', BLUE = '#1f4f9e', SKIN = '#f7dcb8', INK = '#1a1a1a';
+function idxMetrics() {
+  return S.size === 'groot'
+    ? { f: 32, cx: 15, base: 28, tl: 27, ss: 17, sy: 31, w: 30 }
+    : { f: 24, cx: 12, base: 22, tl: 21, ss: 13, sy: 25, w: 23 };
 }
+function pipAt(s, cx, cy, size, flip, fill) {
+  const k = size / 100;
+  return `<path fill="${fill}" d="${SUITP[s]}" transform="translate(${cx} ${cy})${flip ? ' rotate(180)' : ''} translate(${-size / 2} ${-size / 2}) scale(${k})"/>`;
+}
+/* top half of a court figure, local box 60 x 62; drawn twice (second copy turned 180°) */
+function courtHalf(r, s) {
+  const red = s === 1 || s === 2;
+  const main = red ? RED : BLUE, trim = red ? BLUE : RED, col = red ? RED : BLK;
+  const o = `stroke="${INK}" stroke-width=".8" stroke-linejoin="round"`;
+  const face = `<ellipse cx="30" cy="21" rx="7.5" ry="8.5" fill="${SKIN}" ${o}/>
+    <circle cx="27.3" cy="20" r=".9" fill="${INK}"/><circle cx="32.7" cy="20" r=".9" fill="${INK}"/>
+    <path d="M30 21.5v3" stroke="${INK}" stroke-width=".7" fill="none"/>`;
+  const robe = `<path d="M5 62 8 41Q15 32 30 31q15 1 22 10l3 21z" fill="${main}" ${o}/>
+    <path d="M26 37h8v25h-8z" fill="${GOLD}" ${o}/>
+    <path d="M26 44h8M26 51h8M26 58h8" stroke="${INK}" stroke-width=".6"/>
+    <path d="M12 46l7 4-7 4M48 46l-7 4 7 4" fill="none" stroke="${GOLD}" stroke-width="2"/>
+    <path d="M17 33.5Q30 43 43 33.5l-2-2.6Q30 38 19 30.9z" fill="${trim}" ${o}/>`;
+  let fig = '';
+  if (r === 13) { // king: crown, beard, sword
+    fig = `<path d="M47.5 4h3v44h-3z" fill="#d9d9d9" ${o}/><path d="M42 41h14v3H42z" fill="${GOLD}" ${o}/>
+      ${robe}
+      <path d="M22 22q0 14 8 16 8-2 8-16-3 7-8 7t-8-7z" fill="${GOLD}" ${o}/>
+      ${face}<path d="M26 26q4-2 8 0" stroke="${INK}" stroke-width=".8" fill="none"/>
+      <path d="M21 13V3l4 5 3-7 2 6 2-6 3 7 4-5v10z" fill="${GOLD}" ${o}/><circle cx="30" cy="10" r="1.4" fill="${trim}"/>
+      <circle cx="49" cy="46" r="3" fill="${SKIN}" ${o}/>`;
+  } else if (r === 12) { // queen: long hair, tiara, flower
+    fig = `<path d="M13 58V36" stroke="#3a7d32" stroke-width="1.4"/><path d="M13 44q-6-2-7-7 6 0 7 5z" fill="#3a7d32"/>
+      ${robe}
+      <path d="M21 16q-4 14 0 22l5-6q-3-6-1-14zM39 16q4 14 0 22l-5-6q3-6 1-14z" fill="${GOLD}" ${o}/>
+      ${face}<path d="M28.2 26q1.8 1.2 3.6 0" stroke="${RED}" stroke-width="1" fill="none"/>
+      <path d="M22 13l1-6 4 3 3-5 3 5 4-3 1 6z" fill="${GOLD}" ${o}/>
+      <circle cx="23" cy="6.5" r="1.3" fill="${GOLD}" ${o}/><circle cx="30" cy="4.5" r="1.4" fill="${GOLD}" ${o}/><circle cx="37" cy="6.5" r="1.3" fill="${GOLD}" ${o}/>
+      <circle cx="13" cy="33" r="4" fill="${trim}" ${o}/><circle cx="13" cy="33" r="1.6" fill="${GOLD}"/>
+      <circle cx="13" cy="45" r="3" fill="${SKIN}" ${o}/>`;
+  } else { // jack: cap with feather, staff
+    fig = `<path d="M9.5 62V6h2v56z" fill="#8a5a2b" ${o}/><path d="M10.5 6q-7 4-6 11 3-3 6-3 3 0 6 3 1-7-6-11z" fill="#cfcfcf" ${o}/>
+      ${robe}
+      <path d="M22 17q-3 7 1 11l2-5zM38 17q3 7-1 11l-2-5z" fill="${GOLD}" ${o}/>
+      ${face}
+      <path d="M21 15q9-14 18 0z" fill="${trim}" ${o}/><path d="M20 15h20v2.5H20z" fill="${GOLD}" ${o}/>
+      <path d="M37 9q9-8 16-4-8 1-14 7z" fill="${GOLD}" ${o}/>
+      <circle cx="11" cy="45" r="3" fill="${SKIN}" ${o}/>`;
+  }
+  return fig + pipAt(s, 52, 7, 9, false, col);
+}
+function faceSvg(id, standalone) {
+  const r = rankOf(id), s = suitOf(id), red = isRed(id), col = red ? RED : BLK;
+  const M = idxMetrics(), t = rankText(r);
+  const tl = t.length > 1 ? ` textLength="${M.tl}" lengthAdjust="spacingAndGlyphs"` : '';
+  const index = `<text x="${M.cx}" y="${M.base}" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-weight="700" font-size="${M.f}" fill="${col}"${tl}>${t}</text>`
+    + pipAt(s, M.cx, M.sy + M.ss / 2, M.ss, false, col);
+  let body = '';
+  const x0 = M.w + 1, x1 = 99 - M.w;           // usable middle area
+  if (r === 1) {
+    body = pipAt(s, 50, 70, s === 0 ? 50 : 42, false, col);
+    if (s === 0) body += `<circle cx="50" cy="70" r="31" fill="none" stroke="${col}" stroke-width="1"/>`;
+  } else if (r <= 10) {
+    const ps = S.size === 'groot' ? 14 : 16;
+    const L = x0 + ps / 2 + 1, Rr = x1 - ps / 2 - 1, C = 50, T = 24, B = 116, MID = 70;
+    const q = (B - T) / 3;
+    const P = {
+      2: [[C, T], [C, B]], 3: [[C, T], [C, MID], [C, B]],
+      4: [[L, T], [Rr, T], [L, B], [Rr, B]],
+      5: [[L, T], [Rr, T], [C, MID], [L, B], [Rr, B]],
+      6: [[L, T], [Rr, T], [L, MID], [Rr, MID], [L, B], [Rr, B]],
+      7: [[L, T], [Rr, T], [C, (T + MID) / 2], [L, MID], [Rr, MID], [L, B], [Rr, B]],
+      8: [[L, T], [Rr, T], [C, (T + MID) / 2], [L, MID], [Rr, MID], [C, (MID + B) / 2], [L, B], [Rr, B]],
+      9: [[L, T], [Rr, T], [L, T + q], [Rr, T + q], [C, MID], [L, T + 2 * q], [Rr, T + 2 * q], [L, B], [Rr, B]],
+      10: [[L, T], [Rr, T], [C, T + q / 2], [L, T + q], [Rr, T + q], [L, T + 2 * q], [Rr, T + 2 * q], [C, B - q / 2], [L, B], [Rr, B]]
+    }[r];
+    body = P.map(([x, y]) => pipAt(s, x, y, ps, y > MID + 0.1, col)).join('');
+  } else {
+    const cx0 = M.cx * 2 - 3, cx1 = 100 - cx0;
+    const fy0 = 6, fy1 = 134, mid = 70, fw = cx1 - cx0;
+    const sx = fw / 60, sy = (mid - fy0) / 62;
+    const half = `<g transform="translate(${cx0} ${fy0}) scale(${sx} ${sy})">${courtHalf(r, s)}</g>`;
+    body = `<rect x="${cx0}" y="${fy0}" width="${fw}" height="${fy1 - fy0}" fill="#fffdf6" stroke="${col}" stroke-width="1"/>
+      <clipPath id="cp${id}${standalone ? 'x' : ''}"><rect x="${cx0}" y="${fy0}" width="${fw}" height="${mid - fy0}"/></clipPath>
+      <g clip-path="url(#cp${id}${standalone ? 'x' : ''})">${half}</g>
+      <g transform="rotate(180 50 70)"><g clip-path="url(#cp${id}${standalone ? 'x' : ''})">${half}</g></g>
+      <path d="M${cx0} ${mid}H${cx1}" stroke="${col}" stroke-width=".8"/>`;
+  }
+  const ns = standalone ? ' xmlns="http://www.w3.org/2000/svg" width="200" height="280"' : '';
+  const bg = standalone ? `<rect x=".5" y=".5" width="99" height="139" rx="7" fill="#fdfdfb" stroke="#999"/>` : '';
+  return `<svg${ns} viewBox="0 0 100 140" preserveAspectRatio="none">${bg}${index}<g transform="rotate(180 50 70)">${index}</g>${body}</svg>`;
+}
+const faceHtml = id => faceSvg(id, false);
 
 function buildCards() {
   board.innerHTML = '';
@@ -514,7 +603,7 @@ function computeLayout() {
   const topY = Math.max(gap, 6);
   L = {
     W, H: Hh, cw, ch, gap, fi, fs, side,
-    upOff: Math.round(fi * 1.22 + cw * 0.06),
+    upOff: Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
     downOff: Math.max(4, Math.round(ch * 0.1)),
     bottom: Hh - Math.max(6, gap),
     topY
@@ -812,7 +901,7 @@ function showMenu() {
     ['stats', 'Statistieken', () => showStats()],
     ['settings', 'Instellingen', () => showSettings()],
     ['help', 'Uitleg', () => showHelp()],
-    ['home', 'Op beginscherm zetten', () => showInstall()],
+    ['home', 'Op beginscherm zetten', () => showLanding(true)],
   ];
   const sh = dialog('Menu', '<div class="menu-list"></div>', [{ label: 'Sluiten', action: closeDialog }]);
   const list = sh.querySelector('.menu-list');
@@ -887,7 +976,7 @@ function applySettings(changed) {
   document.documentElement.style.setProperty('--spd', speedMs() + 'ms');
   const tc = { groen: '#0b6b3a', blauw: '#155a8a', rood: '#8a1f2a', grijs: '#44484d', paars: '#4e2a74' }[S.felt];
   document.querySelector('meta[name=theme-color]').setAttribute('content', tc);
-  if (changed === 'letters') refreshFaces();
+  if (changed === 'letters' || changed === 'size') refreshFaces();
   if (changed === 'vegasCumulative') updateHud();
   if (G) { relayout(); }
 }
@@ -935,34 +1024,6 @@ function showHelp() {
   [{ label: 'Sluiten', primary: true, action: closeDialog }]);
 }
 
-const SHARE_ICON = '<svg class="ios-share" viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5v10h14V11h-1"/></svg>';
-function showInstall() {
-  dialog('Op beginscherm zetten', `
-  <p>Zo zet je Patience als app op het beginscherm van de iPhone of iPad:</p>
-  <ol class="install-steps">
-    <li>Open deze pagina in <b>Safari</b>.</li>
-    <li>Tik onderaan (of bovenaan op de iPad) op de <b>Deel-knop</b> ${SHARE_ICON}.</li>
-    <li>Scroll omlaag en tik op <b>“Zet op beginscherm”</b>.</li>
-    <li>Tik rechtsboven op <b>“Voeg toe”</b>.</li>
-  </ol>
-  <p>Daarna staat het groene Patience-icoon op het beginscherm en opent het spel schermvullend, zonder reclame. Het werkt ook zonder internet.</p>`,
-  [{ label: 'Sluiten', primary: true, action: closeDialog }]);
-}
-
-/* ================= Install banner ================= */
-function maybeInstallBanner() {
-  const standalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  if (standalone || !ios || load(LS_INSTALL, false)) return;
-  const b = document.createElement('div');
-  b.id = 'installBanner';
-  b.innerHTML = `<span>Zet Patience op je beginscherm</span><button class="go">Hoe?</button><button class="x" aria-label="Sluiten">✕</button>`;
-  b.querySelector('.go').onclick = () => { showInstall(); };
-  b.querySelector('.x').onclick = () => { b.remove(); store(LS_INSTALL, true); };
-  document.body.appendChild(b);
-  setTimeout(() => b.remove(), 15000);
-}
-
 /* ================= Sound ================= */
 let AC = null;
 function unlockAudio() {
@@ -1008,26 +1069,10 @@ function sfx(name) {
 /* ================= Win animation (bouncing cards) ================= */
 const canvas = $('winCanvas');
 let winRAF = 0, winTimer = 0;
-const SUIT_PATHS = [
-  'M50 3C41 20 6 37 6 60c0 14 11 23 23 23 8 0 14-4 18-9-1 9-6 16-14 21h34c-8-5-13-12-14-21 4 5 10 9 18 9 12 0 23-9 23-23C94 37 59 20 50 3z',
-  'M50 92C21 68 4 51 4 31 4 16 15 6 29 6c10 0 17 6 21 14 4-8 11-14 21-14 14 0 25 10 25 25 0 20-17 37-46 61z',
-  'M50 3 87 50 50 97 13 50z',
-  'M50 6a21 21 0 1 1 0 42 21 21 0 1 1 0-42zM27 37a21 21 0 1 1 0 42 21 21 0 1 1 0-42zM73 37a21 21 0 1 1 0 42 21 21 0 1 1 0-42zM42 40h16v18H42zM47 56c-1 17-6 29-14 39h34c-8-10-13-22-14-39z'
-];
-function cardImage(id, w, h, dpr) {
-  const c = document.createElement('canvas'); c.width = w * dpr; c.height = h * dpr;
-  const x = c.getContext('2d'); x.scale(dpr, dpr);
-  const r = Math.max(3, w * 0.08);
-  x.fillStyle = '#fdfdfb'; x.strokeStyle = '#999'; x.lineWidth = 1;
-  x.beginPath(); x.roundRect ? x.roundRect(0.5, 0.5, w - 1, h - 1, r) : x.rect(0.5, 0.5, w - 1, h - 1); x.fill(); x.stroke();
-  const col = isRed(id) ? '#c8102e' : '#111';
-  x.fillStyle = col;
-  x.font = `bold ${Math.round(w * 0.36)}px Helvetica, Arial, sans-serif`; x.textBaseline = 'top';
-  x.fillText(rankText(rankOf(id)), w * 0.06, h * 0.03);
-  const p = new Path2D(SUIT_PATHS[suitOf(id)]);
-  x.save(); x.translate(w * 0.66, h * 0.05); x.scale(w * 0.28 / 100, w * 0.28 / 100); x.fill(p); x.restore();
-  x.save(); x.translate(w * 0.22, h * 0.36); x.scale(w * 0.56 / 100, w * 0.56 / 100); x.fill(p); x.restore();
-  return c;
+function cardImage(id) {
+  const img = new Image();
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(faceSvg(id, true));
+  return img;
 }
 function winAnimation() {
   if (speedMs() === 0) return;
@@ -1045,14 +1090,14 @@ function winAnimation() {
     if (qi >= queue.length) return null;
     const { id, f } = queue[qi++];
     cardEl[id].style.visibility = 'hidden';
-    return { img: cardImage(id, cw, ch, dpr), x: br.left + L.foundXY(f).x, y: br.top + L.foundXY(f).y, vx: (Math.random() < .5 ? -1 : 1) * (2 + Math.random() * 4), vy: -Math.random() * 6 - 1 };
+    return { img: cardImage(id), x: br.left + L.foundXY(f).x, y: br.top + L.foundXY(f).y, vx: (Math.random() < .5 ? -1 : 1) * (2 + Math.random() * 4), vy: -Math.random() * 6 - 1 };
   };
   active = launch();
   const stepFn = () => {
     if (!active) { winRAF = 0; return; }
     active.vy += 0.45; active.x += active.vx; active.y += active.vy;
     if (active.y + ch > innerHeight) { active.y = innerHeight - ch; active.vy = -active.vy * 0.78; if (Math.abs(active.vy) < 2) active.vy = -6 - Math.random() * 4; }
-    ctx.drawImage(active.img, active.x, active.y, cw, ch);
+    if (active.img.complete && active.img.naturalWidth) ctx.drawImage(active.img, active.x, active.y, cw, ch);
     if (active.x < -cw || active.x > innerWidth) active = launch();
     winRAF = requestAnimationFrame(stepFn);
   };
@@ -1082,11 +1127,38 @@ addEventListener('pagehide', () => { if (G) saveGame(); });
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
 
+/* ================= Landing page ================= */
+const isStandalone = () => window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+const isAndroid = /Android/i.test(navigator.userAgent);
+function setLandingTab(tab) {
+  document.querySelectorAll('.ld-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  document.querySelectorAll('.ld-steps').forEach(o => o.hidden = o.dataset.pane !== tab);
+}
+document.querySelectorAll('.ld-tabs button').forEach(b => b.addEventListener('click', () => setLandingTab(b.dataset.tab)));
+let gameShown = false;
+function showLanding(scrollToInstall) {
+  closeDialog();
+  const ld = $('landing');
+  const hasGame = !!(G && G.counted && !G.won) || !!(load(LS_GAME, null) || {}).G;
+  $('ldPlay').textContent = gameShown ? 'Terug naar het spel' : (hasGame ? 'Verder spelen' : 'Spelen');
+  $('ldPlay2').textContent = $('ldPlay').textContent;
+  $('ldResume').hidden = gameShown || !hasGame;
+  setLandingTab(isAndroid ? 'android' : 'ios');
+  ld.hidden = false;
+  ld.scrollTop = 0;
+  if (scrollToInstall) requestAnimationFrame(() => $('ldInstall').scrollIntoView({ block: 'start' }));
+}
+function hideLanding() {
+  unlockAudio();
+  $('landing').hidden = true;
+  if (!gameShown) startGame();
+}
+$('ldPlay').addEventListener('click', hideLanding);
+$('ldPlay2').addEventListener('click', hideLanding);
+
 /* ================= Boot ================= */
-function boot() {
-  buildCards();
-  buildBar();
-  applySettings();
+function startGame() {
+  gameShown = true;
   const saved = load(LS_GAME, null);
   if (saved && saved.G && Array.isArray(saved.G.tab) && !saved.G.won) {
     G = saved.G; H = saved.H || [];
@@ -1095,7 +1167,14 @@ function boot() {
     relayout();
     G = null; newGame(false);
   }
-  maybeInstallBanner();
+}
+function boot() {
+  buildCards();
+  buildBar();
+  applySettings();
+  relayout();
+  if (isStandalone()) startGame();
+  else showLanding(false);
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
