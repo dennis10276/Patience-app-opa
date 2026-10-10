@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
@@ -16,7 +16,7 @@ function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val));
 /* ================= Settings ================= */
 const DEFAULTS = {
   draw: 3, vegas: false, vegasCumulative: true,
-  letters: 'fr', size: 'groot', hand: 'rechts',
+  deck: 'klassiek', letters: 'en', size: 'groot', hand: 'rechts',
   sound: true, showTime: true, unveil: false, colHeight: 'dynamisch',
   shadows: true, back: 'blauw', felt: 'groen', speed: 'normaal',
   autoFinish: true, tapMove: true,
@@ -682,7 +682,27 @@ function faceSvg(id, standalone) {
   const bg = standalone ? `<rect x=".5" y=".5" width="99" height="139" rx="7" fill="#fdfdfb" stroke="#999"/>` : '';
   return `<svg${ns} viewBox="0 0 100 140" preserveAspectRatio="none">${bg}${index}<g transform="rotate(180 50 70)">${index}</g>${body}</svg>`;
 }
-const faceHtml = id => faceSvg(id, false);
+/* image deck: "Vector Playing Cards" by Byron Knoll (CC0 / public domain) */
+const CARD_FILE = id => {
+  const r = rankOf(id), n = { 1: 'ace', 11: 'jack', 12: 'queen', 13: 'king' }[r] || String(r);
+  return `cards/${n}_of_${['spades', 'hearts', 'diamonds', 'clubs'][suitOf(id)]}.png`;
+};
+const imgDeck = () => S.deck !== 'getekend';
+const cardRatio = () => imgDeck() ? 1.452 : 1.4;
+/* large, easy-to-read corner index laid over the artwork (Groot mode) */
+function bigIndex(id) {
+  const r = rankOf(id), s = suitOf(id), col = isRed(id) ? RED : BLK, t = rankText(r);
+  const tl = t.length > 1 ? ' textLength="30" lengthAdjust="spacingAndGlyphs"' : '';
+  return `<svg viewBox="0 0 100 145.2" preserveAspectRatio="none" class="bigidx">
+    <path d="M0 0H35V42q0 7-7 7H0z" fill="#fff"/>
+    <text x="17.5" y="29" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-weight="700" font-size="33" fill="${col}"${tl}>${t}</text>
+    ${pipAt(s, 17.5, 39.5, 15, false, col)}</svg>`;
+}
+const faceHtml = id => imgDeck()
+  ? `<img src="${CARD_FILE(id)}" alt="" draggable="false">` + (S.size === 'groot' ? bigIndex(id) : '')
+  : faceSvg(id, false);
+const preloaded = [];
+function preloadCards() { if (!imgDeck() || preloaded.length) return; for (let id = 0; id < 52; id++) { const im = new Image(); im.src = CARD_FILE(id); preloaded.push(im); } }
 
 function buildCards() {
   board.innerHTML = '';
@@ -711,22 +731,22 @@ function computeLayout() {
   if (!side) {
     gap = Math.max(3, Math.round(W * (large ? 0.009 : 0.016)));
     cw = (W - gap * 8) / 7;
-    const maxByH = (Hh - gap * 3) / (1.4 * (large ? 3.3 : 3.7));
+    const maxByH = (Hh - gap * 3) / (cardRatio() * (large ? 3.3 : 3.7));
     cw = Math.floor(Math.min(cw, maxByH, 150));
   } else {
     // landscape: foundations in one side column, stock + waste in the other, tableau in the middle
     gap = Math.max(3, Math.round(Hh * (large ? 0.014 : 0.022)));
     cw = (W - gap * 13) / 9;
-    const maxByH = (Hh - gap * 5) / 4 / 1.4;
+    const maxByH = (Hh - gap * 5) / 4 / cardRatio();
     cw = Math.floor(Math.min(cw, maxByH * (large ? 1.12 : 1), 150));
   }
-  const ch = Math.round(cw * 1.4);
+  const ch = Math.round(cw * cardRatio());
   const fi = Math.round(cw * (large ? 0.42 : 0.33));   // index font size
   const fs = Math.round(cw * (large ? 0.34 : 0.27));   // small suit size
   const topY = Math.max(gap, 6);
   L = {
     W, H: Hh, cw, ch, gap, fi, fs, side,
-    upOff: Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
+    upOff: imgDeck() ? Math.round(ch * (large ? 0.355 : 0.26)) : Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
     downOff: Math.max(4, Math.round(ch * 0.1)),
     bottom: Hh - Math.max(6, gap),
     topY
@@ -757,7 +777,8 @@ function computeLayout() {
   }
   const st = document.documentElement.style;
   st.setProperty('--cw', cw + 'px'); st.setProperty('--ch', ch + 'px');
-  st.setProperty('--cr', Math.max(3, Math.round(cw * 0.08)) + 'px');
+  st.setProperty('--cr', Math.max(3, Math.round(cw * (imgDeck() ? 0.05 : 0.08))) + 'px');
+  document.body.classList.toggle('imgdeck', imgDeck());
   st.setProperty('--fi', fi + 'px'); st.setProperty('--fs', fs + 'px');
 }
 
@@ -1054,7 +1075,9 @@ function showSettings() {
   </div>
   <div class="set-group"><h3>Weergave</h3>
     ${row('Kaartgrootte', seg('size', [['normaal', 'Normaal'], ['groot', 'Groot']]))}
+    ${row('Kaarten', seg('deck', [['klassiek', 'Klassiek'], ['getekend', 'Frans getekend']]))}
     ${row('Kaartletters', seg('letters', [['en', 'K Q J'], ['nl', 'H V B'], ['fr', 'R D V']]))}
+    <p class="note">Bij de klassieke kaarten zie je de grote letters alleen met kaartgrootte “Groot”.</p>
     ${row('Hand', seg('hand', [['rechts', 'Rechtshandig'], ['links', 'Linkshandig']]))}
     ${row('Kolomhoogte', seg('colHeight', [['dynamisch', 'Dynamisch'], ['vast', 'Vast']]))}
     ${row('Tijd tonen', onoff('showTime'))}
@@ -1067,7 +1090,7 @@ function showSettings() {
   <div class="set-group"><h3>Knoppen in de menubalk</h3>
     ${barRow('newg', 'Nieuw spel')}${barRow('restart', 'Dit spel opnieuw')}${barRow('hint', 'Hint')}${barRow('undo', 'Terug')}${barRow('stats', 'Statistieken')}
   </div>
-  <p class="note" style="text-align:center">Patience ${VERSION} · zonder reclame</p>`;
+  <p class="note" style="text-align:center">Patience ${VERSION} · zonder reclame<br>Klassieke kaarten: Byron Knoll (publiek domein)</p>`;
   const sh = dialog('Instellingen', html, [{ label: 'Klaar', primary: true, action: closeSettings }]);
   sh.querySelectorAll('.seg').forEach(sg => sg.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
@@ -1099,7 +1122,7 @@ function applySettings(changed) {
   document.documentElement.style.setProperty('--spd', speedMs() + 'ms');
   const tc = { groen: '#0b6b3a', blauw: '#155a8a', rood: '#8a1f2a', grijs: '#44484d', paars: '#4e2a74' }[S.felt];
   document.querySelector('meta[name=theme-color]').setAttribute('content', tc);
-  if (changed === 'letters' || changed === 'size') refreshFaces();
+  if (changed === 'letters' || changed === 'size' || changed === 'deck') { preloadCards(); refreshFaces(); const f = $('ldFan'); if (f) f.innerHTML = ''; }
   if (changed === 'vegasCumulative') updateHud();
   if (G) { relayout(); }
 }
@@ -1194,7 +1217,7 @@ const canvas = $('winCanvas');
 let winRAF = 0, winTimer = 0;
 function cardImage(id) {
   const img = new Image();
-  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(faceSvg(id, true));
+  img.src = imgDeck() ? CARD_FILE(id) : 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(faceSvg(id, true));
   return img;
 }
 function winAnimation() {
@@ -1260,7 +1283,7 @@ function buildFan() {
     const d = document.createElement('div'); d.className = 'fc';
     d.style.transform = `translateX(${dx}px) rotate(${rot}deg)`;
     d.style.animationDelay = (k * 90) + 'ms';
-    d.innerHTML = faceSvg(id, false).replace(/cp(\d+)/g, 'lp$1');
+    d.innerHTML = faceHtml(id).replace(/cp(\d+)/g, 'lp$1');
     fan.appendChild(d);
   });
 }
@@ -1297,6 +1320,7 @@ function startGame() {
   }
 }
 function boot() {
+  preloadCards();
   buildCards();
   buildBar();
   applySettings();
