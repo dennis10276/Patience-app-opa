@@ -14,7 +14,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -42,8 +42,9 @@
 <section id="landing" hidden>
   <div class="ld-wrap">
     <header class="ld-hero">
-      <img src="icons/icon-192.png" alt="" class="ld-icon" width="96" height="96">
+      <div class="ld-fan" id="ldFan" aria-hidden="true"></div>
       <h1>Patience</h1>
+      <div class="ld-rule" aria-hidden="true"><span></span><svg viewBox="0 0 100 100"><path d="M50 3 87 50 50 97 13 50z"/></svg><span></span></div>
       <p class="ld-sub">Het klassieke kaartspel<br>zonder reclame</p>
       <button id="ldPlay" class="ld-play">Spelen</button>
       <p class="ld-small" id="ldResume" hidden>Je gaat verder waar je gebleven was.</p>
@@ -116,6 +117,7 @@
     </article>
 
     <button id="ldPlay2" class="ld-play ld-play-bottom">Spelen</button>
+    <p class="ld-foot">Geen reclame · Werkt zonder internet · Wordt vanzelf bewaard</p>
   </div>
 </section>
 
@@ -123,6 +125,6 @@
 <div id="toast"></div>
 <div id="modal" hidden><div class="sheet" role="dialog" aria-modal="true"></div></div>
 
-<script src="game.js?v=2"></script>
+<script src="game.js?v=3"></script>
 </body>
 </html>

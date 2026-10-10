@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
@@ -286,23 +286,94 @@ function usefulMoves() {
   return res;
 }
 
-/* can any card from stock/waste ever be played (without other changes)? */
-function stockPlayable() {
-  const playable = c => foundTarget(c) >= 0 || [0, 1, 2, 3, 4, 5, 6].some(t => canTab(c, t));
-  let stock = G.stock.slice(), waste = G.waste.slice(), passes = G.passes, cycles = 0;
-  if (waste.length && playable(top(waste))) return true;
-  while (cycles < 3) {
-    if (stock.length) {
-      const n = Math.min(G.draw, stock.length);
-      for (let k = 0; k < n; k++) waste.push(stock.pop());
-      if (playable(top(waste))) return true;
-    } else {
-      if (!waste.length || passes >= maxPasses()) return false;
-      while (waste.length) stock.push(waste.pop());
-      passes++; cycles++;
+/* ================= Exact dead-end check =================
+   Explores every position that can be reached with legal moves: tableau moves, waste to tableau,
+   foundation back to tableau, drawing and turning over the stock. Progress means a card can go to
+   the foundation or a face-down card gets turned over. If no reachable position allows progress,
+   the game can never be won and we say so. If the search is too large to finish, we never claim
+   "stuck" (unknown = not stuck). */
+function analyse(limit = 80000) {
+  const draw = G.draw, maxP = maxPasses(), vegas = G.vegas;
+  const fc0 = [0, 0, 0, 0];
+  G.found.forEach(p => p.forEach(c => fc0[suitOf(c)]++));
+  const down = G.tab.map(p => p.filter(c => !G.up[c]).length);
+  const root = { tab: G.tab.map(p => p.filter(c => G.up[c])), stock: G.stock.slice(), waste: G.waste.slice(), fc: fc0, passes: G.passes, first: null };
+  const key = st => st.tab.map(p => p.join(',')).join('|') + '/' + st.stock.join(',') + '/' + st.waste.join(',') + '/' + st.fc.join(',') + '/' + (vegas ? st.passes : 0);
+  const fits = (st, c, t) => {
+    const p = st.tab[t];
+    if (!p.length) return down[t] === 0 && rankOf(c) === 13;
+    const tc = p[p.length - 1];
+    return isRed(tc) !== isRed(c) && rankOf(tc) === rankOf(c) + 1;
+  };
+  const goesUp = (st, c) => rankOf(c) === st.fc[suitOf(c)] + 1;
+  const clone = st => ({ tab: st.tab.map(p => p.slice()), stock: st.stock.slice(), waste: st.waste.slice(), fc: st.fc.slice(), passes: st.passes, first: st.first });
+  const seen = new Set([key(root)]);
+  const queue = [root];
+  let qi = 0, rootFirst = null;
+  while (qi < queue.length) {
+    if (seen.size > limit) return { stuck: false, unknown: true, first: rootFirst };
+    const st = queue[qi++];
+    const tag = mv => st.first || mv;
+    // progress moves
+    for (let t = 0; t < 7; t++) {
+      const p = st.tab[t];
+      if (p.length && goesUp(st, p[p.length - 1])) return { stuck: false, first: tag({ type: 'move', ids: [p[p.length - 1]], toType: 'found' }) };
+    }
+    const w = st.waste.length ? st.waste[st.waste.length - 1] : -1;
+    if (w >= 0 && goesUp(st, w)) return { stuck: false, first: tag({ type: 'move', ids: [w], toType: 'found' }) };
+    for (let s = 0; s < 7; s++) {
+      const p = st.tab[s];
+      if (p.length && down[s] > 0) {
+        for (let t = 0; t < 7; t++) if (t !== s && fits(st, p[0], t)) return { stuck: false, first: tag({ type: 'move', ids: p.slice(), toType: 'tab', toIdx: t }) };
+      }
+    }
+    const push = (ns, mv) => {
+      if (!ns.first) ns.first = mv;
+      if (!rootFirst) rootFirst = mv;
+      const k = key(ns);
+      if (!seen.has(k)) { seen.add(k); queue.push(ns); }
+    };
+    // tableau to tableau (sequences); whole-column moves only when they don't just hop between empty columns
+    for (let s = 0; s < 7; s++) {
+      const p = st.tab[s];
+      for (let i = 0; i < p.length; i++) {
+        if (i === 0 && down[s] > 0) continue; // handled above as progress
+        for (let t = 0; t < 7; t++) {
+          if (t === s || !fits(st, p[i], t)) continue;
+          if (i === 0 && !st.tab[t].length) continue;
+          const ns = clone(st);
+          ns.tab[t].push(...ns.tab[s].splice(i));
+          push(ns, { type: 'move', ids: p.slice(i), toType: 'tab', toIdx: t });
+        }
+      }
+    }
+    // waste to tableau
+    if (w >= 0) for (let t = 0; t < 7; t++) if (fits(st, w, t)) {
+      const ns = clone(st); ns.tab[t].push(ns.waste.pop());
+      push(ns, { type: 'move', ids: [w], toType: 'tab', toIdx: t });
+    }
+    // foundation back to tableau
+    for (let k = 0; k < 4; k++) if (st.fc[k] > 0) {
+      const c = k * 13 + st.fc[k] - 1;
+      for (let t = 0; t < 7; t++) if (fits(st, c, t)) {
+        const ns = clone(st); ns.fc[k]--; ns.tab[t].push(c);
+        push(ns, { type: 'move', ids: [c], toType: 'tab', toIdx: t });
+      }
+    }
+    // stock
+    if (st.stock.length) {
+      const ns = clone(st);
+      const n = Math.min(draw, ns.stock.length);
+      for (let k = 0; k < n; k++) ns.waste.push(ns.stock.pop());
+      push(ns, { type: 'draw' });
+    } else if (st.waste.length && st.passes < maxP) {
+      const ns = clone(st);
+      while (ns.waste.length) ns.stock.push(ns.waste.pop());
+      ns.passes++;
+      push(ns, { type: 'draw' });
     }
   }
-  return false;
+  return { stuck: true, first: null };
 }
 
 function hint() {
@@ -310,20 +381,28 @@ function hint() {
   const moves = usefulMoves();
   if (moves.length) {
     const m = moves[hintIdx % moves.length]; hintIdx++;
-    const dest = m.toType === 'found'
-      ? (G.found[m.toIdx].length ? cardEl[top(G.found[m.toIdx])] : slotEl['f' + m.toIdx])
-      : (G.tab[m.toIdx].length ? cardEl[top(G.tab[m.toIdx])] : slotEl['t' + m.toIdx]);
-    flash(m.ids.map(i => cardEl[i]).concat([dest]));
-    sfx('hint');
+    showHintMove(m.ids, m.toType, m.toIdx);
     return;
   }
-  if ((G.stock.length || canRecycle()) && stockPlayable()) {
-    flash([G.stock.length ? cardEl[top(G.stock)] : slotEl.stock]);
-    toast(G.stock.length ? 'Tik op de stapel om een kaart te pakken' : 'Tik op de lege plek om de stapel om te draaien');
-    sfx('hint');
+  const a = analyse();
+  if (a.stuck) { noMoves(); return; }
+  const m = a.first;
+  if (m && m.type === 'move') {
+    let toIdx = m.toIdx;
+    if (m.toType === 'found') toIdx = foundTarget(m.ids[0]);
+    showHintMove(m.ids, m.toType, toIdx);
     return;
   }
-  noMoves();
+  flash([G.stock.length ? cardEl[top(G.stock)] : slotEl.stock]);
+  toast(G.stock.length ? 'Tik op de stapel om een kaart te pakken' : 'Tik op de lege plek om de stapel om te draaien');
+  sfx('hint');
+}
+function showHintMove(ids, toType, toIdx) {
+  const dest = toType === 'found'
+    ? (G.found[toIdx].length ? cardEl[top(G.found[toIdx])] : slotEl['f' + toIdx])
+    : (G.tab[toIdx].length ? cardEl[top(G.tab[toIdx])] : slotEl['t' + toIdx]);
+  flash(ids.map(i => cardEl[i]).concat([dest]));
+  sfx('hint');
 }
 
 function flash(els) {
@@ -336,11 +415,14 @@ function shake(ids) {
 
 function noMoves() {
   stuckShown = true;
+  G.deadEnd = true; saveGame();
   sfx('bad');
-  dialog('Geen zetten meer', '<p>Er zijn geen zetten meer mogelijk.</p><p>Je kunt een zet terugnemen of een nieuw spel beginnen.</p>', [
-    { label: 'Terug', action: () => { closeDialog(); undo(); }, disabled: !H.length },
+  dialog('Geen zetten meer', `<p>Helaas, dit spel kan niet meer worden uitgespeeld.</p>
+    <p>Er kan geen kaart meer naar de stapels boven en er kan geen dichte kaart meer worden omgedraaid, ook niet met de kaarten uit de stapel.</p>`, [
     { label: 'Nieuw spel', primary: true, action: () => { closeDialog(); newGame(false); } },
-    { label: 'Verder kijken', action: closeDialog }
+    { label: 'Zet terug', action: () => { closeDialog(); undo(); }, disabled: !H.length },
+    { label: 'Dit spel opnieuw', action: () => { closeDialog(); newGame(false, true); } },
+    { label: 'Sluiten', action: closeDialog }
   ]);
 }
 
@@ -352,29 +434,15 @@ function afterChange() {
     setTimeout(autoFinish, speedMs() + 120);
     return;
   }
-  // detect being stuck: nothing useful on the table and nothing playable in the stock
-  if (!stuckShown && !usefulMoves().length && !stockPlayable() && !anyTableauMove()) {
-    stuckShown = true;
-    setTimeout(() => { if (!G.won && !busy) noMoves(); }, speedMs() + 500);
+  // tell the player automatically when the game really cannot be won any more
+  if (!stuckShown && !G.deadEnd) {
+    const at = G.moves, seed = G.seed;
+    setTimeout(() => {
+      if (!G || G.won || busy || stuckShown || G.deadEnd || G.moves !== at || G.seed !== seed || !$('modal').hidden) return;
+      if (usefulMoves().length) return;
+      if (analyse().stuck) noMoves();
+    }, speedMs() + 450);
   }
-}
-
-/* any legal tableau move at all (used so we never claim "stuck" too early) */
-function anyTableauMove() {
-  for (let s = 0; s < 7; s++) {
-    const p = G.tab[s];
-    for (let i = 0; i < p.length; i++) {
-      if (!G.up[p[i]]) continue;
-      for (let t = 0; t < 7; t++) {
-        if (t === s || !canTab(p[i], t)) continue;
-        if (i === 0 && !G.tab[t].length) continue;
-        return true;
-      }
-    }
-  }
-  // a foundation card that could come back down
-  for (let f = 0; f < 4; f++) { const c = top(G.found[f]); if (c >= 0) for (let t = 0; t < 7; t++) if (G.tab[t].length && canTab(c, t)) return true; }
-  return false;
 }
 
 function autoFinish() {
@@ -1136,8 +1204,20 @@ function setLandingTab(tab) {
 }
 document.querySelectorAll('.ld-tabs button').forEach(b => b.addEventListener('click', () => setLandingTab(b.dataset.tab)));
 let gameShown = false;
+function buildFan() {
+  const fan = $('ldFan'); if (!fan || fan.childElementCount) return;
+  // ace of spades, king of hearts, queen of clubs, jack of diamonds
+  [[0, -21, -64], [25, -7, -22], [50, 7, 22], [36, 21, 64]].forEach(([id, rot, dx], k) => {
+    const d = document.createElement('div'); d.className = 'fc';
+    d.style.transform = `translateX(${dx}px) rotate(${rot}deg)`;
+    d.style.animationDelay = (k * 90) + 'ms';
+    d.innerHTML = faceSvg(id, false).replace(/cp(\d+)/g, 'lp$1');
+    fan.appendChild(d);
+  });
+}
 function showLanding(scrollToInstall) {
   closeDialog();
+  buildFan();
   const ld = $('landing');
   const hasGame = !!(G && G.counted && !G.won) || !!(load(LS_GAME, null) || {}).G;
   $('ldPlay').textContent = gameShown ? 'Terug naar het spel' : (hasGame ? 'Verder spelen' : 'Spelen');
@@ -1180,6 +1260,6 @@ function boot() {
   }
 }
 // testing hook
-window.__patience = { get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
+window.__patience = { analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
 boot();
 })();

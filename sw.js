@@ -1,6 +1,6 @@
 /* Offline support. Network first (so updates arrive right away), cache as fallback. */
-const CACHE = 'patience-v2';
-const FILES = ['./', 'index.html', 'style.css?v=2', 'game.js?v=2', 'manifest.webmanifest',
+const CACHE = 'patience-v3';
+const FILES = ['./', 'index.html', 'style.css?v=3', 'game.js?v=3', 'manifest.webmanifest',
   'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
