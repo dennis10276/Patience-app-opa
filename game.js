@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
@@ -685,24 +685,15 @@ function faceSvg(id, standalone) {
 /* image deck: "Vector Playing Cards" by Byron Knoll (CC0 / public domain) */
 const CARD_FILE = id => {
   const r = rankOf(id), n = { 1: 'ace', 11: 'jack', 12: 'queen', 13: 'king' }[r] || String(r);
-  return `cards/${n}_of_${['spades', 'hearts', 'diamonds', 'clubs'][suitOf(id)]}.png`;
+  return `cards/${S.size === 'groot' ? 'groot/' : ''}${n}_of_${['spades', 'hearts', 'diamonds', 'clubs'][suitOf(id)]}.png`;
 };
 const imgDeck = () => S.deck !== 'getekend';
 const cardRatio = () => imgDeck() ? 1.452 : 1.4;
-/* large, easy-to-read corner index laid over the artwork (Groot mode) */
-function bigIndex(id) {
-  const r = rankOf(id), s = suitOf(id), col = isRed(id) ? RED : BLK, t = rankText(r);
-  const tl = t.length > 1 ? ' textLength="30" lengthAdjust="spacingAndGlyphs"' : '';
-  return `<svg viewBox="0 0 100 145.2" preserveAspectRatio="none" class="bigidx">
-    <path d="M0 0H35V42q0 7-7 7H0z" fill="#fff"/>
-    <text x="17.5" y="29" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-weight="700" font-size="33" fill="${col}"${tl}>${t}</text>
-    ${pipAt(s, 17.5, 39.5, 15, false, col)}</svg>`;
-}
 const faceHtml = id => imgDeck()
-  ? `<img src="${CARD_FILE(id)}" alt="" draggable="false">` + (S.size === 'groot' ? bigIndex(id) : '')
+  ? `<img src="${CARD_FILE(id)}" alt="" draggable="false">`
   : faceSvg(id, false);
 const preloaded = [];
-function preloadCards() { if (!imgDeck() || preloaded.length) return; for (let id = 0; id < 52; id++) { const im = new Image(); im.src = CARD_FILE(id); preloaded.push(im); } }
+function preloadCards() { if (!imgDeck()) return; preloaded.length = 0; for (let id = 0; id < 52; id++) { const im = new Image(); im.src = CARD_FILE(id); preloaded.push(im); } }
 
 function buildCards() {
   board.innerHTML = '';
@@ -746,7 +737,7 @@ function computeLayout() {
   const topY = Math.max(gap, 6);
   L = {
     W, H: Hh, cw, ch, gap, fi, fs, side,
-    upOff: imgDeck() ? Math.round(ch * (large ? 0.355 : 0.26)) : Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
+    upOff: imgDeck() ? Math.round(ch * (large ? 0.38 : 0.26)) : Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
     downOff: Math.max(4, Math.round(ch * 0.1)),
     bottom: Hh - Math.max(6, gap),
     topY
@@ -1077,7 +1068,7 @@ function showSettings() {
     ${row('Kaartgrootte', seg('size', [['normaal', 'Normaal'], ['groot', 'Groot']]))}
     ${row('Kaarten', seg('deck', [['klassiek', 'Klassiek'], ['getekend', 'Frans getekend']]))}
     ${row('Kaartletters', seg('letters', [['en', 'K Q J'], ['nl', 'H V B'], ['fr', 'R D V']]))}
-    <p class="note">Bij de klassieke kaarten zie je de grote letters alleen met kaartgrootte “Groot”.</p>
+    <p class="note">Bij “Groot” hebben de klassieke kaarten extra grote hoekcijfers. De kaartletters gelden voor de Frans getekende kaarten.</p>
     ${row('Hand', seg('hand', [['rechts', 'Rechtshandig'], ['links', 'Linkshandig']]))}
     ${row('Kolomhoogte', seg('colHeight', [['dynamisch', 'Dynamisch'], ['vast', 'Vast']]))}
     ${row('Tijd tonen', onoff('showTime'))}

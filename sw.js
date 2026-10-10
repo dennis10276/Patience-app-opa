@@ -1,8 +1,8 @@
 /* Offline support. Network first (so updates arrive right away), cache as fallback. */
-const CACHE = 'patience-v5';
-const FILES = ['./', 'index.html', 'style.css?v=5', 'game.js?v=5', 'manifest.webmanifest',
+const CACHE = 'patience-v6';
+const FILES = ['./', 'index.html', 'style.css?v=6', 'game.js?v=6', 'manifest.webmanifest',
   'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
-['spades', 'hearts', 'diamonds', 'clubs'].forEach(s => ['ace', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'jack', 'queen', 'king'].forEach(r => FILES.push(`cards/${r}_of_${s}.png`)));
+['spades', 'hearts', 'diamonds', 'clubs'].forEach(s => ['ace', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'jack', 'queen', 'king'].forEach(r => { FILES.push(`cards/${r}_of_${s}.png`); FILES.push(`cards/groot/${r}_of_${s}.png`); }));
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
