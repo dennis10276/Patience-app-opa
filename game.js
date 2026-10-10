@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
@@ -16,7 +16,7 @@ function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val));
 /* ================= Settings ================= */
 const DEFAULTS = {
   draw: 3, vegas: false, vegasCumulative: true,
-  letters: 'en', size: 'groot', hand: 'rechts',
+  letters: 'fr', size: 'groot', hand: 'rechts',
   sound: true, showTime: true, unveil: false, colHeight: 'dynamisch',
   shadows: true, back: 'blauw', felt: 'groen', speed: 'normaal',
   autoFinish: true, tapMove: true,
@@ -545,46 +545,101 @@ function pipAt(s, cx, cy, size, flip, fill) {
   const k = size / 100;
   return `<path fill="${fill}" d="${SUITP[s]}" transform="translate(${cx} ${cy})${flip ? ' rotate(180)' : ''} translate(${-size / 2} ${-size / 2}) scale(${k})"/>`;
 }
-/* top half of a court figure, local box 60 x 62; drawn twice (second copy turned 180°) */
-function courtHalf(r, s) {
-  const red = s === 1 || s === 2;
-  const main = red ? RED : BLUE, trim = red ? BLUE : RED, col = red ? RED : BLK;
-  const o = `stroke="${INK}" stroke-width=".8" stroke-linejoin="round"`;
-  const face = `<ellipse cx="30" cy="21" rx="7.5" ry="8.5" fill="${SKIN}" ${o}/>
-    <circle cx="27.3" cy="20" r=".9" fill="${INK}"/><circle cx="32.7" cy="20" r=".9" fill="${INK}"/>
-    <path d="M30 21.5v3" stroke="${INK}" stroke-width=".7" fill="none"/>`;
-  const robe = `<path d="M5 62 8 41Q15 32 30 31q15 1 22 10l3 21z" fill="${main}" ${o}/>
-    <path d="M26 37h8v25h-8z" fill="${GOLD}" ${o}/>
-    <path d="M26 44h8M26 51h8M26 58h8" stroke="${INK}" stroke-width=".6"/>
-    <path d="M12 46l7 4-7 4M48 46l-7 4 7 4" fill="none" stroke="${GOLD}" stroke-width="2"/>
-    <path d="M17 33.5Q30 43 43 33.5l-2-2.6Q30 38 19 30.9z" fill="${trim}" ${o}/>`;
-  let fig = '';
-  if (r === 13) { // king: crown, beard, sword
-    fig = `<path d="M47.5 4h3v44h-3z" fill="#d9d9d9" ${o}/><path d="M42 41h14v3H42z" fill="${GOLD}" ${o}/>
-      ${robe}
-      <path d="M22 22q0 14 8 16 8-2 8-16-3 7-8 7t-8-7z" fill="${GOLD}" ${o}/>
-      ${face}<path d="M26 26q4-2 8 0" stroke="${INK}" stroke-width=".8" fill="none"/>
-      <path d="M21 13V3l4 5 3-7 2 6 2-6 3 7 4-5v10z" fill="${GOLD}" ${o}/><circle cx="30" cy="10" r="1.4" fill="${trim}"/>
-      <circle cx="49" cy="46" r="3" fill="${SKIN}" ${o}/>`;
-  } else if (r === 12) { // queen: long hair, tiara, flower
-    fig = `<path d="M13 58V36" stroke="#3a7d32" stroke-width="1.4"/><path d="M13 44q-6-2-7-7 6 0 7 5z" fill="#3a7d32"/>
-      ${robe}
-      <path d="M21 16q-4 14 0 22l5-6q-3-6-1-14zM39 16q4 14 0 22l-5-6q3-6 1-14z" fill="${GOLD}" ${o}/>
-      ${face}<path d="M28.2 26q1.8 1.2 3.6 0" stroke="${RED}" stroke-width="1" fill="none"/>
-      <path d="M22 13l1-6 4 3 3-5 3 5 4-3 1 6z" fill="${GOLD}" ${o}/>
-      <circle cx="23" cy="6.5" r="1.3" fill="${GOLD}" ${o}/><circle cx="30" cy="4.5" r="1.4" fill="${GOLD}" ${o}/><circle cx="37" cy="6.5" r="1.3" fill="${GOLD}" ${o}/>
-      <circle cx="13" cy="33" r="4" fill="${trim}" ${o}/><circle cx="13" cy="33" r="1.6" fill="${GOLD}"/>
-      <circle cx="13" cy="45" r="3" fill="${SKIN}" ${o}/>`;
-  } else { // jack: cap with feather, staff
-    fig = `<path d="M9.5 62V6h2v56z" fill="#8a5a2b" ${o}/><path d="M10.5 6q-7 4-6 11 3-3 6-3 3 0 6 3 1-7-6-11z" fill="#cfcfcf" ${o}/>
-      ${robe}
-      <path d="M22 17q-3 7 1 11l2-5zM38 17q3 7-1 11l-2-5z" fill="${GOLD}" ${o}/>
-      ${face}
-      <path d="M21 15q9-14 18 0z" fill="${trim}" ${o}/><path d="M20 15h20v2.5H20z" fill="${GOLD}" ${o}/>
-      <path d="M37 9q9-8 16-4-8 1-14 7z" fill="${GOLD}" ${o}/>
-      <circle cx="11" cy="45" r="3" fill="${SKIN}" ${o}/>`;
+/* top half of a court figure in the classic French tradition (local box 60 x 62; drawn twice, second copy turned 180°).
+   Names and attributes follow the centuries-old French pattern; the drawings themselves are our own. */
+const GREEN = '#2e7d4f', WHITE = '#fbfaf4';
+const COURT = {
+  13: [ { name: 'DAVID', item: 'harp', side: 'L', A: BLUE, B: RED, C: GREEN },
+        { name: 'CHARLES', item: 'sword', side: 'R', A: RED, B: BLUE, C: GREEN },
+        { name: 'CÉSAR', item: 'scepter', side: 'R', A: GREEN, B: RED, C: BLUE },
+        { name: 'ALEXANDRE', item: 'orb', side: 'L', A: RED, B: GREEN, C: BLUE } ],
+  12: [ { name: 'PALLAS', item: 'shield', side: 'L', A: GREEN, B: RED, C: BLUE },
+        { name: 'JUDITH', item: 'rose', side: 'R', A: BLUE, B: RED, C: GREEN },
+        { name: 'RACHEL', item: 'rose', side: 'L', A: RED, B: GREEN, C: BLUE },
+        { name: 'ARGINE', item: 'fan', side: 'R', A: BLUE, B: GREEN, C: RED } ],
+  11: [ { name: 'OGIER', item: 'halberd', side: 'L', A: RED, B: BLUE, C: GREEN },
+        { name: 'LA HIRE', item: 'axe', side: 'R', A: GREEN, B: RED, C: BLUE },
+        { name: 'HECTOR', item: 'halberd', side: 'R', A: BLUE, B: RED, C: GREEN },
+        { name: 'LANCELOT', item: 'pennant', side: 'L', A: RED, B: GREEN, C: BLUE } ]
+};
+function courtItem(item, o) {
+  // drawn for the left hand (hand at 13,46); mirrored for the right side
+  switch (item) {
+    case 'harp': return `<path d="M5.5 60V31q7-6 13 2v27z" fill="none" stroke="${GOLD}" stroke-width="2.4" ${o}/>
+      <path d="M8.5 33v26M11.5 32v27M14.5 33v26" stroke="#8a6d2b" stroke-width=".5"/>`;
+    case 'sword': return `<path d="M12 44 5.5 2.5 8.5 2 15 43.5z" fill="#dcdcdc" ${o}/><path d="M7 41.5l12-3 .6 2.4-12 3z" fill="${GOLD}" ${o}/>`;
+    case 'scepter': return `<path d="M12 60V18h2.2v42z" fill="${GOLD}" ${o}/><path d="M13.1 8l3.4 5-3.4 5-3.4-5z" fill="${GOLD}" ${o}/>
+      <circle cx="13.1" cy="7" r="1.6" fill="${RED}" ${o}/>`;
+    case 'orb': return `<circle cx="13" cy="38" r="5.5" fill="${GOLD}" ${o}/><path d="M7.5 38h11" stroke="${INK}" stroke-width=".7"/>
+      <path d="M13 32.5v-5M10.8 29.5h4.4" stroke="${INK}" stroke-width="1.1"/>`;
+    case 'shield': return `<path d="M3.5 36h15v9q0 9-7.5 13-7.5-4-7.5-13z" fill="${GOLD}" ${o}/><path d="M6 38.5h10v6.5q0 6-5 9-5-3-5-9z" fill="${BLUE}"/>
+      <path d="M11 41l2 3-2 3-2-3z" fill="${GOLD}"/>`;
+    case 'rose': return `<path d="M13 60V34" stroke="${GREEN}" stroke-width="1.3"/><path d="M13 46q-7-1-8-6 6 0 8 4z" fill="${GREEN}"/>
+      <circle cx="10.6" cy="31.5" r="2.6" fill="${RED}" ${o}/><circle cx="15.4" cy="31.5" r="2.6" fill="${RED}" ${o}/>
+      <circle cx="13" cy="29" r="2.6" fill="${RED}" ${o}/><circle cx="13" cy="31" r="1.3" fill="${GOLD}"/>`;
+    case 'fan': return `<path d="M13 46 2 33q11-9 22 0z" fill="${WHITE}" ${o}/><path d="M13 46 5.5 30.5M13 46 10 28.5M13 46l3-17.5M13 46l7.5-15.5" stroke="${RED}" stroke-width=".7"/>`;
+    case 'halberd': return `<path d="M9.5 62V5h2v57z" fill="#8a5a2b" ${o}/><path d="M11.5 9q8 1 9 8-5-3-9-1z" fill="#d9d9d9" ${o}/>
+      <path d="M9.5 9q-5 2-5 7 3-3 5-3z" fill="#d9d9d9" ${o}/><path d="M10.5 0l1.6 5h-3.2z" fill="#d9d9d9" ${o}/>`;
+    case 'axe': return `<path d="M9.5 60V14h2v46z" fill="#8a5a2b" ${o}/><path d="M11.5 15q10-2 11 7 0 5-3 7-1-6-8-6z" fill="#d9d9d9" ${o}/>`;
+    case 'pennant': return `<path d="M9.8 62V3h1.8v59z" fill="#8a5a2b" ${o}/><path d="M11.6 4l12 4-12 4z" fill="${GOLD}" ${o}/><path d="M11.6 6.5l7 1.5-7 1.5z" fill="${RED}"/>`;
   }
-  return fig + pipAt(s, 52, 7, 9, false, col);
+  return '';
+}
+function courtHalf(r, s) {
+  const d = COURT[r][s], col = (s === 1 || s === 2) ? RED : BLK;
+  const o = `stroke="${INK}" stroke-width=".7" stroke-linejoin="round"`;
+  const L = d.side === 'L';
+  const mirror = L ? '' : ' transform="translate(60 0) scale(-1 1)"';
+  // name along the free edge
+  const nx = L ? 57.5 : 2.5;
+  const name = `<text x="${nx}" y="60" transform="rotate(-90 ${nx} 60)" font-family="Georgia,'Times New Roman',serif" font-size="4.6" font-weight="700" letter-spacing=".4" fill="${col}">${d.name}</text>`;
+  // robe
+  const robe = `<path d="M7 62 9 42Q13 33 22 31l8 9 8-9q9 2 13 11l2 20z" fill="${d.A}" ${o}/>
+    <path d="M22 31l8 9 8-9 1 31H21z" fill="${d.B}" ${o}/>
+    <path d="M28.2 40h3.6v22h-3.6z" fill="${GOLD}" ${o}/>
+    <circle cx="30" cy="45" r=".8" fill="${INK}"/><circle cx="30" cy="51" r=".8" fill="${INK}"/><circle cx="30" cy="57" r=".8" fill="${INK}"/>
+    <path d="M10 52l2.5-2.5L15 52l-2.5 2.5zM45 52l2.5-2.5L50 52l-2.5 2.5zM14 59l2-2 2 2-2 2zM42 59l2-2 2 2-2 2z" fill="${GOLD}"/>
+    <path d="M8.5 44q4 3 7.5 2M51.5 44q-4 3-7.5 2" fill="none" stroke="${GOLD}" stroke-width="1.2"/>`;
+  let collar;
+  if (r === 13) collar = `<path d="M16.5 33.5Q30 46 43.5 33.5L41 30Q30 40 19 30z" fill="${WHITE}" ${o}/>
+      <path d="M22 35.5l.8 1.8-.8 0zM27 38l.8 1.8h-.8zM33 38l.8 1.8h-.8zM38 35.5l.8 1.8h-.8z" fill="${INK}" stroke="${INK}" stroke-width=".9"/>`;
+  else if (r === 12) collar = `<path d="M19.5 31.5Q30 41 40.5 31.5" fill="none" stroke="${GOLD}" stroke-width="1.6"/>
+      <circle cx="24" cy="35.4" r="1" fill="${WHITE}" ${o}/><circle cx="30" cy="37.4" r="1.2" fill="${d.C}" ${o}/><circle cx="36" cy="35.4" r="1" fill="${WHITE}" ${o}/>`;
+  else collar = `<path d="M18 32.5Q30 42 42 32.5L40.5 30Q30 37.5 19.5 30z" fill="${d.C}" ${o}/>`;
+  // head
+  const face = `<ellipse cx="30" cy="21.5" rx="7.3" ry="8.4" fill="${SKIN}" ${o}/>
+    <path d="M26 18.6h2.6M31.4 18.6H34" stroke="#7a5230" stroke-width=".6"/>
+    <circle cx="27.4" cy="20.3" r=".85" fill="${INK}"/><circle cx="32.6" cy="20.3" r=".85" fill="${INK}"/>
+    <path d="M30 21v3.6l-1 .3" fill="none" stroke="#b58a62" stroke-width=".6"/>
+    <path d="M28.3 26.7q1.7.9 3.4 0" fill="none" stroke="${RED}" stroke-width=".8"/>`;
+  let head;
+  if (r === 13) head = `<path d="M21.5 15q-1.5 8 1 12l1.5-4zM38.5 15q1.5 8-1 12l-1.5-4z" fill="${GOLD}" ${o}/>
+      ${face}
+      <path d="M22.6 23.5Q23 36.5 30 38.5q7-2 7.4-15-2.8 5.6-7.4 5.6t-7.4-5.6z" fill="${GOLD}" ${o}/>
+      <path d="M26.3 26.6q3.7-2.2 7.4 0" fill="none" stroke="#8a6d2b" stroke-width=".9"/>
+      <path d="M20.5 14.5V6l3.5 3.6L27 2.8l3 5.2 3-5.2 3 6.8 3.5-3.6v8.5z" fill="${GOLD}" ${o}/>
+      <path d="M20.5 11.6h19v3h-19z" fill="${GOLD}" ${o}/><circle cx="30" cy="13.1" r="1.1" fill="${RED}"/>
+      <circle cx="25" cy="13.1" r=".8" fill="${BLUE}"/><circle cx="35" cy="13.1" r=".8" fill="${BLUE}"/>
+      <circle cx="20.5" cy="5.6" r=".9" fill="${GOLD}" ${o}/><circle cx="27" cy="2.4" r=".9" fill="${GOLD}" ${o}/><circle cx="33" cy="2.4" r=".9" fill="${GOLD}" ${o}/><circle cx="39.5" cy="5.6" r=".9" fill="${GOLD}" ${o}/>`;
+  else if (r === 12) head = `<path d="M21 13Q15 30 18 41l6-6q-3-11 0-21zM39 13q6 17 3 28l-6-6q3-11 0-21z" fill="${d.C}" ${o}/>
+      <path d="M22 15q-3 9 0 15l2-4zM38 15q3 9 0 15l-2-4z" fill="${GOLD}" ${o}/>
+      ${face}
+      <path d="M22 14.6l1-6.4 3.4 3.4L30 5.5l3.6 6.1 3.4-3.4 1 6.4z" fill="${GOLD}" ${o}/>
+      <circle cx="23" cy="7.6" r="1" fill="${WHITE}" ${o}/><circle cx="30" cy="4.8" r="1.1" fill="${WHITE}" ${o}/><circle cx="37" cy="7.6" r="1" fill="${WHITE}" ${o}/>
+      <path d="M22.3 12.8h15.4" stroke="${RED}" stroke-width="1"/>`;
+  else head = `<path d="M22.3 16q-2.4 6 .2 10.5l1.6-3.5zM37.7 16q2.4 6-.2 10.5l-1.6-3.5z" fill="${GOLD}" ${o}/>
+      ${face}
+      <path d="M26.6 26q3.4-1.6 6.8 0" fill="none" stroke="#8a6d2b" stroke-width=".9"/>
+      <path d="M20.5 14.2q1.5-10 10.5-10 8.5 0 10 10z" fill="${d.B}" ${o}/>
+      <path d="M18.5 13.6h23v3h-23z" fill="${GOLD}" ${o}/>
+      <path d="M37 9q8-9 16-6.5-7 1.5-11.5 8.5z" fill="${WHITE}" ${o}/><path d="M38.5 8.5q6-6 12-5.2" fill="none" stroke="${d.C}" stroke-width=".6"/>`;
+  const hand = `<circle cx="13" cy="46" r="2.9" fill="${SKIN}" ${o}/>`;
+  const restHand = `<circle cx="45" cy="52" r="2.7" fill="${SKIN}" ${o}/>`;
+  const itemBehind = d.item === 'sword' || d.item === 'halberd' || d.item === 'pennant' || d.item === 'axe' || d.item === 'scepter';
+  const item = `<g${mirror}>${courtItem(d.item, o)}</g>`;
+  const hands = `<g${mirror}>${hand}${restHand}</g>`;
+  return (itemBehind ? item : '') + robe + collar + head + (itemBehind ? '' : item) + hands + name
+    + pipAt(s, L ? 52 : 8, 6.5, 8.5, false, col);
 }
 function faceSvg(id, standalone) {
   const r = rankOf(id), s = suitOf(id), red = isRed(id), col = red ? RED : BLK;
@@ -1197,12 +1252,6 @@ document.addEventListener('dblclick', e => e.preventDefault(), { passive: false 
 
 /* ================= Landing page ================= */
 const isStandalone = () => window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
-const isAndroid = /Android/i.test(navigator.userAgent);
-function setLandingTab(tab) {
-  document.querySelectorAll('.ld-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  document.querySelectorAll('.ld-steps').forEach(o => o.hidden = o.dataset.pane !== tab);
-}
-document.querySelectorAll('.ld-tabs button').forEach(b => b.addEventListener('click', () => setLandingTab(b.dataset.tab)));
 let gameShown = false;
 function buildFan() {
   const fan = $('ldFan'); if (!fan || fan.childElementCount) return;
@@ -1223,7 +1272,6 @@ function showLanding(scrollToInstall) {
   $('ldPlay').textContent = gameShown ? 'Terug naar het spel' : (hasGame ? 'Verder spelen' : 'Spelen');
   $('ldPlay2').textContent = $('ldPlay').textContent;
   $('ldResume').hidden = gameShown || !hasGame;
-  setLandingTab(isAndroid ? 'android' : 'ios');
   ld.hidden = false;
   ld.scrollTop = 0;
   if (scrollToInstall) requestAnimationFrame(() => $('ldInstall').scrollIntoView({ block: 'start' }));
