@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Patience</title>
+<meta name="description" content="Patience (Klondike) kaartspel – zonder reclame.">
+<meta name="theme-color" content="#0b6b3a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Patience">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="suit0" viewBox="0 0 100 100"><path d="M50 3C41 20 6 37 6 60c0 14 11 23 23 23 8 0 14-4 18-9-1 9-6 16-14 21h34c-8-5-13-12-14-21 4 5 10 9 18 9 12 0 23-9 23-23C94 37 59 20 50 3z"/></symbol>
+    <symbol id="suit1" viewBox="0 0 100 100"><path d="M50 92C21 68 4 51 4 31 4 16 15 6 29 6c10 0 17 6 21 14 4-8 11-14 21-14 14 0 25 10 25 25 0 20-17 37-46 61z"/></symbol>
+    <symbol id="suit2" viewBox="0 0 100 100"><path d="M50 3 87 50 50 97 13 50z"/></symbol>
+    <symbol id="suit3" viewBox="0 0 100 100"><circle cx="50" cy="27" r="21"/><circle cx="27" cy="58" r="21"/><circle cx="73" cy="58" r="21"/><path d="M42 40h16v18H42z"/><path d="M47 56c-1 17-6 29-14 39h34c-8-10-13-22-14-39z"/></symbol>
+    <symbol id="crownK" viewBox="0 0 100 70"><path d="M8 62 4 14l24 22L50 4l22 32 24-22-4 48z"/><rect x="8" y="58" width="84" height="10" rx="3"/></symbol>
+    <symbol id="crownQ" viewBox="0 0 100 70"><path d="M12 62 8 28l20 14 22-28 22 28 20-14-4 34z"/><circle cx="8" cy="24" r="6"/><circle cx="50" cy="10" r="7"/><circle cx="92" cy="24" r="6"/><rect x="12" y="58" width="76" height="10" rx="3"/></symbol>
+    <symbol id="crownJ" viewBox="0 0 100 70"><path d="M14 64c0-22 14-40 36-40s36 18 36 40z"/><path d="M50 24c6-12 18-20 34-20-6 8-12 14-20 18z"/><rect x="10" y="58" width="80" height="10" rx="3"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <header id="hud">
+    <div class="hud-item"><span class="hud-label" id="scoreLabel">Score</span><span id="score">0</span></div>
+    <div class="hud-item"><span class="hud-label">Zetten</span><span id="moves">0</span></div>
+    <div class="hud-item" id="timeBox"><span class="hud-label">Tijd</span><span id="time">0:00</span></div>
+  </header>
+  <main id="board"></main>
+  <nav id="bar"></nav>
+</div>
+
+<canvas id="winCanvas"></canvas>
+<div id="toast"></div>
+<div id="modal" hidden><div class="sheet" role="dialog" aria-modal="true"></div></div>
+
+<script src="game.js?v=1"></script>
+</body>
+</html>

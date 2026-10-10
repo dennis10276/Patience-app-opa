@@ -1,0 +1,23 @@
+# Patience voor opa
+
+Patience (Klondike) kaartspel in het Nederlands, zonder reclame. Werkt als web-app: open de pagina in Safari op de iPhone/iPad en kies **Deel → Zet op beginscherm**. Daarna opent het schermvullend met een eigen icoon en werkt het ook zonder internet.
+
+**Speel:** https://dennis10276.github.io/Patience-app-opa/
+
+## Functies
+- 1 of 3 kaarten trekken
+- Standaard of Vegas telling (Vegas optioneel opgeteld over spellen)
+- Tik op een kaart om hem automatisch te verplaatsen, of sleep hem
+- Onbeperkt ongedaan maken (blijft bewaard na afsluiten)
+- Hints, en melding als er geen zetten meer zijn
+- Automatisch afmaken als alle kaarten open liggen
+- Statistieken per spelsoort (gespeeld, gewonnen, reeksen, beste score/tijd)
+- Staand en liggend scherm, iPhone en iPad
+- Instellingen: kaartgrootte (normaal/groot), kaartletters (K Q J / H V B / R D V), rechts- of linkshandig, tijd tonen, dichte kaarten tonen, kolomhoogte, schaduwen, kleur achterkant, achtergrondkleur, snelheid, geluid, knoppen in de menubalk
+- Spel wordt automatisch bewaard
+
+## Bestanden
+- `index.html`, `style.css`, `game.js` – het spel
+- `manifest.webmanifest`, `sw.js`, `icons/` – beginscherm-icoon en offline werken
+
+Bij een nieuwe versie: verhoog `CACHE` in `sw.js` (en `?v=` in `index.html`) zodat iPhones de update meteen ophalen.
