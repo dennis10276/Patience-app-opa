@@ -386,8 +386,3 @@ table.stats thead th { color: #0b6b3a; }
 }
 .ld-feats li b { color: #fff; }
 .ld-foot { text-align: center; font-size: 15px; color: rgba(245,241,230,.55); margin: 4px 0 0; }
-
-.menu-draw { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-  background: #e8f3ec; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; }
-.menu-draw > span { font-size: 19px; font-weight: 600; }
-.menu-draw .seg button { font-size: 17px; padding: 10px 14px; }
