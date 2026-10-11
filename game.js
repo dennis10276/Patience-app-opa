@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.2';
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
@@ -1151,7 +1151,7 @@ function showHelp() {
   <p><b>Doel:</b> leg alle kaarten op de vier stapels rechtsboven (of linksboven), per kleur van Aas tot Heer/Koning.</p>
   <p><b>De zeven rijen:</b> leg kaarten aflopend en om en om rood en zwart. Bijvoorbeeld een rode 9 op een zwarte 10. Je mag ook een hele reeks tegelijk verplaatsen.</p>
   <p><b>Lege rij:</b> daar mag alleen een Heer (Koning) of een reeks die met een Heer begint.</p>
-  <p><b>De stapel:</b> tik op de dichte stapel om ${S.draw === 1 ? 'een kaart' : 'drie kaarten'} om te draaien. Is de stapel op, tik dan op de lege plek om opnieuw te beginnen.</p>
+  <p><b>De stapel:</b> tik op de dichte stapel om ${S.draw === 1 ? 'een kaart' : 'drie kaarten'} om te draaien. Kiezen tussen 1 of 3 kaarten doe je onder <b>Menu → Instellingen</b>. Is de stapel op, tik dan op de lege plek om opnieuw te beginnen.</p>
   <p><b>Verplaatsen:</b> tik op een kaart en hij gaat vanzelf naar de beste plek. Je kunt een kaart ook met je vinger slepen.</p>
   <p><b>Hint:</b> laat een mogelijke zet zien. Tik nog eens voor de volgende.</p>
   <p><b>Terug:</b> neemt de laatste zet terug, zo vaak als je wilt.</p>
