@@ -9,7 +9,7 @@ function dashboard(hash = '#' + 'a'.repeat(32), saved = new Map(), search = '') 
   const node = () => ({ textContent: '', value: '', children: [], style: {}, classList: { toggle() {} }, appendChild(c) { this.children.push(c); }, append(...c) { this.children.push(...c); }, replaceChildren() { this.children = []; } });
   const context = {
     Date: class extends Date { static now() { return now; } }, Intl, URLSearchParams, AbortController, setTimeout, clearTimeout,
-    location: { hash, search }, history: { replaceState(a, b, value) { const [query, hash] = value.split('#'); context.location.hash = '#' + hash; context.location.search = query; } },
+    location: { hash, search, pathname: '/Patience-app-opa/dash/' }, history: { replaceState(a, b, value) { const next = new URL(value, 'https://example.com' + context.location.pathname + context.location.search + context.location.hash); context.location.hash = next.hash; context.location.search = next.search; context.location.pathname = next.pathname; } },
     localStorage: { getItem: k => saved.get(k), setItem: (k, v) => saved.set(k, v) },
     async fetch(url, options) { return { ok: true }; },
     PATIENCE_TRACKING: { databaseUrl: 'https://example.firebasedatabase.app' },
@@ -163,4 +163,20 @@ test('unknown apps and malformed Sudoku metadata are ignored', () => {
   } });
   assert.equal(a.nodes.get('sessions').children.length, 1);
   assert.equal(a.nodes.get('todayGames').textContent, '1 spel');
+});
+
+
+test('switching to all games removes the previous query filter and survives reload', () => {
+  const saved = new Map(), id = 'a'.repeat(32);
+  const a = dashboard('#' + id, saved, '?game=sudoku');
+  a.nodes.get('game').value = 'all'; a.nodes.get('game').onchange();
+  assert.equal(a.context.location.search, '');
+  assert.equal(a.context.location.pathname, '/Patience-app-opa/dash/');
+  a.nodes.get('who').value = 'b'.repeat(32); a.nodes.get('who').onchange();
+  const reloaded = dashboard(a.context.location.hash, saved, a.context.location.search);
+  assert.equal(reloaded.nodes.get('game').value, 'all');
+  assert.equal(reloaded.nodes.get('who').value, 'b'.repeat(32));
+  const other = dashboard('#' + id, new Map(), '?game=sudoku&view=family');
+  other.nodes.get('game').value = 'all'; other.nodes.get('game').onchange();
+  assert.equal(other.context.location.search, '?view=family');
 });

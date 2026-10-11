@@ -19,7 +19,7 @@ function bookmark() {
   const query = new URLSearchParams(location.search || '');
   if (game === 'all') query.delete('game'); else query.set('game', game);
   const queryString = query.toString();
-  history.replaceState(null, '', (queryString ? '?' + queryString : '') + '#' + key);
+  history.replaceState(null, '', location.pathname + (queryString ? '?' + queryString : '') + '#' + key);
 }
 let records = [], cache = Object.create(null), stream = null, connected = false;
 let players = Object.create(null), directory = null, directoryLoaded = false;
