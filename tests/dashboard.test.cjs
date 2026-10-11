@@ -255,3 +255,57 @@ test('expanded session details stay open through live updates and clock refreshe
   refreshed.open = false; refreshed.listeners.toggle(); a.advance(10000);
   assert.equal(a.nodes.get('sessions').children[0].children[5].children[0].open, false);
 });
+
+
+test('compact daily attempts retain interruptions and use measured hours without spreading pauses', () => {
+  const a = dashboard();
+  // Both bursts occurred on Sunday: 1 minute at noon and 2 minutes at 19:00.
+  const start = Date.parse('2026-10-11T10:00:00Z'), last = Date.parse('2026-10-11T17:02:00Z');
+  const record = {start, last, seconds:180, games:1, wins:0, active:false, detail:{
+    v:2, round:'c'.repeat(32), reason:'hidden', ended:last, initial:0, progress:5,total:52,
+    lastAction:'hint',actionAt:last,lastProgressAt:last,maxGap:120, actions:{hint:2},
+    stops:{pause:4,hidden:1},hours:{h12:60,h19:120}
+  }};
+  a.streams[0].emit('put', {path:'/',data:{compact:record}});
+  assert.equal(a.nodes.get('weekTime').textContent, '3 min');
+  assert.equal(a.nodes.get('sessions').children.length, 1);
+  assert.equal(a.nodes.get('observedRounds').textContent, 1);
+  const hours = a.nodes.get('hours').children;
+  assert.equal(hours[12].children[2].textContent, '1 min');
+  assert.equal(hours[19].children[2].textContent, '2 min');
+  assert.equal(hours[15].children[2].textContent, '0 sec');
+  assert.match(a.nodes.get('preferredTimes').textContent, /19:00–20:00/);
+  const endings = a.nodes.get('endings').children.map(row => row.children.map(c=>c.textContent).join(' ')).join(' ');
+  assert.match(endings, /Pauze gekozen.*4×/); assert.match(endings, /App verborgen.*1×/);
+  const details=a.nodes.get('sessions').children[0].children[5].children[0];
+  assert.ok(details.children.some(c=>c.textContent.includes('Samengevoegd per poging per dag')));
+});
+
+test('compact counter maps are bounded and invalid maps do not distort the dashboard', () => {
+  const a = dashboard(), start = a.now-60000;
+  const record={start,last:a.now,seconds:60,games:1,wins:0,active:false,detail:{
+    v:2,round:'c'.repeat(32),reason:'pause',ended:a.now,initial:0,progress:0,total:52,
+    lastAction:'none',actionAt:0,lastProgressAt:start,maxGap:0
+  }};
+  a.streams[0].emit('put',{path:'/',data:{valid:record,
+    badHour:{...record,detail:{...record.detail,hours:{h24:10}}},
+    tooMuch:{...record,detail:{...record.detail,hours:{h12:61}}},
+    badStop:{...record,detail:{...record.detail,stops:{pause:0.5}}},
+    unknownStop:{...record,detail:{...record.detail,stops:{invented:1}}}
+  }});
+  assert.equal(a.nodes.get('sessions').children.length, 1);
+  assert.equal(a.nodes.get('weekTime').textContent,'1 min');
+});
+
+test('history groups a day and merges resumed attempts while preserving expansion on refresh', () => {
+  const a = dashboard(), r = {start:a.now-60000,last:a.now,seconds:30,games:1,wins:0,active:false};
+  a.streams[0].emit('put',{path:'/',data:{one:{...r,detail:detail(r)},two:{...r,games:0,detail:detail(r)}}});
+  let day = a.nodes.get('history').children[0];
+  assert.equal(a.nodes.get('history').children.length,1);
+  assert.equal(day.children.length,2); // one heading, one grouped attempt
+  assert.match(day.children[1].children[1].textContent,/1 min actief/);
+  day.open=true; day.listeners.toggle(); a.advance(10000);
+  day=a.nodes.get('history').children[0]; assert.equal(day.open,true);
+  a.nodes.get('who').value='b'.repeat(32); a.nodes.get('who').onchange();
+  assert.match(a.nodes.get('history').children[0].textContent,/Nog geen/);
+});

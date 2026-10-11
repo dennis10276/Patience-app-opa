@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.9.0';
+const VERSION = '1.10.0';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
