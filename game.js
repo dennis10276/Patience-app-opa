@@ -2,7 +2,8 @@
 (() => {
 'use strict';
 
-const VERSION = '1.6.2';
+const VERSION = '1.7.0';
+const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
@@ -134,6 +135,7 @@ function canRecycle() { return G.waste.length > 0 && G.passes < maxPasses(); }
 
 /* ================= Actions ================= */
 function startClock() {
+  playTracking?.touch(!G.counted);
   if (!G.started) { G.started = true; }
   if (!G.counted) {
     G.counted = true;
@@ -211,6 +213,7 @@ function drawStock() {
 
 function undo() {
   if (busy || !H.length || G.won) return;
+  playTracking?.touch();
   const prev = JSON.parse(H.pop());
   const keep = { time: G.time, counted: G.counted, started: G.started };
   if (G.vegas && S.vegasCumulative) { ST.vegasTotal += prev.score - G.score; saveStats(); }
@@ -378,6 +381,7 @@ function analyse(limit = 80000) {
 
 function hint() {
   if (busy || G.won) return;
+  if (G.started) playTracking?.touch();
   const moves = usefulMoves();
   if (moves.length) {
     const m = moves[hintIdx % moves.length]; hintIdx++;
@@ -473,6 +477,7 @@ function autoFinish() {
 /* ================= Win ================= */
 function win() {
   if (G.won) return;
+  playTracking?.win();
   G.won = true; busy = false;
   let bonus = 0;
   if (!G.vegas && G.time >= 30) bonus = Math.round(700000 / G.time);
@@ -511,6 +516,7 @@ function newGame(confirmFirst, sameSeed) {
     return;
   }
   if (inProgress) { ST['d' + G.draw].streak = 0; saveStats(); }
+  playTracking?.stop();
   stopWinAnimation();
   const seed = sameSeed && G ? G.seed : (Math.random() * 2 ** 31) | 0;
   G = newGameState(seed, S.draw, S.vegas);
@@ -522,6 +528,9 @@ function newGame(confirmFirst, sameSeed) {
 
 /* ================= Layout & rendering ================= */
 const board = document.getElementById('board');
+board.addEventListener('pointerdown', () => {
+  if (G && G.started && !G.won && $('modal').hidden && $('landing').hidden) playTracking?.touch();
+});
 const cardEl = [];
 const slotEl = {};
 let L = {}; // layout metrics
@@ -993,6 +1002,7 @@ function updateBar() {
 
 /* ================= Timer ================= */
 setInterval(() => {
+  playTracking?.tick(!!(G && G.started && !G.won && $('landing').hidden && ($('modal').hidden || !dialogPausesClock)));
   if (!G || !G.started || G.won || document.hidden || !$('modal').hidden && dialogPausesClock) return;
   G.time++;
   if (!G.vegas && G.time % 10 === 0) G.score = Math.max(0, G.score - 2);
@@ -1009,6 +1019,7 @@ function toast(msg) {
 
 /* ================= Dialogs ================= */
 function dialog(title, html, buttons) {
+  if (dialogPausesClock) playTracking?.stop();
   const m = $('modal'), sh = m.querySelector('.sheet');
   sh.innerHTML = `${title ? `<h2>${title}</h2>` : ''}<div class="body">${html}</div>${buttons && buttons.length ? '<div class="btns"></div>' : ''}`;
   if (buttons) {
@@ -1035,6 +1046,7 @@ function showMenu() {
     ['undo', 'Zet terugnemen', () => { closeDialog(); undo(); }],
     ['stats', 'Statistieken', () => showStats()],
     ['settings', 'Instellingen', () => showSettings()],
+    ['stats', 'Speeltijd delen', () => showSharing()],
     ['help', 'Uitleg', () => showHelp()],
     ['home', 'Op beginscherm zetten', () => showLanding(true)],
   ];
@@ -1049,6 +1061,25 @@ function showMenu() {
 
 function seg(key, options, onChange) {
   return `<div class="seg" data-key="${key}">${options.map(([v, l]) => `<button data-v="${v}" class="${String(S[key]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+}
+function showSharing() {
+  const enabled = playTracking?.enabled;
+  const url = playTracking?.link() || '';
+  const message = !playTracking?.configured
+    ? '<p>Het speeloverzicht is nog niet ingesteld.</p>'
+    : enabled
+      ? '<p>Je deelt wanneer en hoe lang je speelt. Met deze privélink kan je familie het overzicht bekijken.</p>'
+      : '<p>Wil je met je familie delen wanneer en hoe lang je speelt? Alleen speeltijd en het aantal gespeelde en gewonnen spellen worden bewaard.</p>';
+  const buttons = [{ label: 'Sluiten', action: closeDialog }];
+  if (enabled) buttons.unshift({ label: 'Kopieer privélink', primary: true, action: async () => {
+    try { await navigator.clipboard.writeText(url); toast('Privélink gekopieerd'); }
+    catch (_) { const input = $('sharingLink'); input.focus(); input.select(); }
+  } });
+  if (playTracking?.configured) buttons.unshift(enabled
+    ? { label: 'Stoppen met delen', action: () => { playTracking.disable(); showSharing(); } }
+    : { label: 'Speeltijd delen', primary: true, action: () => { playTracking.enable(); showSharing(); } });
+  const sh = dialog('Speeltijd delen', message + (enabled ? '<p><label>Privélink<br><input id="sharingLink" readonly style="width:100%;font:inherit;padding:10px" aria-label="Privélink"></label></p><p class="note">Bewaar deze link. Iedereen met de link kan het overzicht bekijken. Eerdere speeltijd blijft bewaard als je stopt met delen.</p>' : ''), buttons);
+  if (enabled) { const input = sh.querySelector('#sharingLink'); input.value = url; input.onclick = () => input.select(); }
 }
 function showSettings() {
   const row = (label, control) => `<div class="set-row"><span>${label}</span>${control}</div>`;
@@ -1279,6 +1310,7 @@ function buildFan() {
   });
 }
 function showLanding(scrollToInstall) {
+  playTracking?.stop();
   closeDialog();
   buildFan();
   const ld = $('landing');
