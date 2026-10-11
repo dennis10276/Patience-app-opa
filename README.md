@@ -28,7 +28,7 @@ Bij een nieuwe versie: verhoog `CACHE` in `sw.js` (en `?v=` in `index.html`) zod
 
 ## Speeltijd voor de familie
 
-Patience gebruikt een **eigen** Firebase Realtime Database (`patience-opa`, België), los van Mahjong.
+Patience gebruikt een **eigen** Firebase Realtime Database (`patience-opa`, België), los van Mahjong. Sudoku gebruikt dezelfde database en hetzelfde online familieoverzicht.
 `tracking-config.js` bevat alleen het database-adres. Publiceer `firebase/rules.json` in de Firebase-console
 bij het inrichten van een nieuwe database; de nieuw aangemaakte database staat aanvankelijk op slot.
 
@@ -38,7 +38,8 @@ apparaatcode, die bij volgende bezoeken en updates gelijk blijft. Spellen op je 
 niet bij die van opa. Alleen de pagina openen zonder te spelen levert geen speelrecord op.
 
 Voor de familie: open `dash/` en kies de speler in de lijst, net als bij Mahjong. Apparaten verschijnen
-vanzelf zodra erop wordt gespeeld. Het dashboard onthoudt de keuze en bewaart hem in de URL, zodat
+vanzelf zodra erop wordt gespeeld. Kies **Alle spellen**, **Patience** of **Sudoku** om de totalen en speelmomenten te filteren.
+Het dashboard onthoudt speler en spelkeuze en bewaart ze in de URL, zodat
 bestaande links blijven werken. Via **Speler een naam geven** kun je bijvoorbeeld "Opa" invullen;
 deze naam blijft in Firebase bewaard en is ook op andere familieapparaten zichtbaar.
 
@@ -72,3 +73,24 @@ Controle: `node --test tests/*.test.cjs` (offline sync, herhaald verzenden, inac
 achtergrondtijd, herstel na afsluiten, opslagfouten, automatische migratie, middernacht, spelerskeuze,
 naamgeving en live dashboardupdates). Controleer de regels ook met de Rules Playground in Firebase:
 hele tellers toestaan, breuken weigeren, spelerslijst lezen toestaan en root lezen weigeren.
+
+## Sudoku in hetzelfde overzicht
+
+Het online familieoverzicht staat op https://dennis10276.github.io/Patience-app-opa/dash/ .
+Alle spellen telt de speeltijd en begonnen/voltooide spellen van Patience en Sudoku samen.
+Sudoku toont daarnaast moeilijkheid, dagelijks/normaal, gebruikte hints en gemaakte fouten per
+speelmoment, plus hint- en fouttotalen over de laatste zeven dagen. Hints en fouten worden als acties
+geteld, ook als een zet later wordt teruggedraaid. De geschiedenis begint bij deze update; eerdere lokale
+Sudoku-statistieken worden niet als historische sessies geïmporteerd.
+
+Een sessie zonder `app` blijft Patience; Sudoku schrijft `app: "sudoku"` en zijn extra tellers in dezelfde
+`sessions/{apparaat}/{sessie}`-structuur. De bestaande lees- en schrijfrechten blijven gelijk.
+De validatieregels accepteren de nieuwe velden alleen voor Sudoku en blijven breuken weigeren.
+Het dashboard gebruikt dezelfde liveverbinding bij een andere spelkeuze; het downloadt niet opnieuw.
+
+Beide apps delen `patience.sharing.v1` voor hun apparaatcode waar browseropslag gedeeld wordt.
+Daarmee verschijnt een apparaat met één naam voor beide spellen. Sommige geïnstalleerde webapps,
+privétabs of browsers hebben eigen opslag en verschijnen als apart apparaat. Hun namen kun je in het
+overzicht instellen. De uploadwachtrijen en offlinecaches blijven per spel gescheiden. Elke serviceworker
+ruimt alleen zijn eigen oude caches op. Sudoku telt vanaf de eerste invoer, notitie of hint, stopt bij
+pauzes/menu's/achtergrondtijd en bewaart alleen samenvattingen; geen puzzels, oplossingen of zettenlog.
