@@ -12,7 +12,7 @@ function app(saved = new Map(), storage = {}) {
   const context = {
     Date: class extends Date { static now() { return now; } }, Intl,
     crypto: webcrypto, AbortController, URL, location: { href: 'https://example.test/patience/' },
-    navigator: { onLine: true }, document: { hidden: false, addEventListener(k, fn) { events[k] = fn; } },
+    navigator: { onLine: true, webdriver: !!storage.automated }, document: { hidden: false, addEventListener(k, fn) { events[k] = fn; } },
     localStorage: { getItem: k => { if (storage.readFails) throw new Error('blocked'); return saved.get(k); }, setItem: (k, v) => { if (storage.writeFails) throw new Error('quota'); saved.set(k, v); } },
     sessionStorage: { getItem: k => tab.get(k), setItem: (k, v) => tab.set(k, v) },
     setInterval: fn => intervals.push(fn), setTimeout, clearTimeout,
@@ -243,4 +243,12 @@ test('menu to restart refines the counter and terminal attempts are never resume
   a.tracking.touch(false, {round}); a.tracking.win(); await a.settle(); await a.tracking.flush();
   assert.equal(a.database.size, 2);
   assert.deepEqual([...a.database.values()][1].detail.stops, {won:1});
+});
+
+
+test('automated browsers never register a player or upload queued history', async () => {
+  const saved = new Map(), a = app(saved, {automated:true});
+  await a.settle();
+  assert.equal(a.tracking,undefined); assert.equal(a.requests.length,0);
+  assert.equal(saved.size,0); assert.equal(a.intervals.length,0);
 });
