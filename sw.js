@@ -1,6 +1,6 @@
 /* Offline support. Network first (so updates arrive right away), cache as fallback. */
-const CACHE = 'patience-v9';
-const FILES = ['./', 'index.html', 'style.css?v=9', 'game.js?v=9', 'manifest.webmanifest',
+const CACHE = 'patience-v10';
+const FILES = ['./', 'index.html', 'style.css?v=10', 'game.js?v=10', 'tracking-config.js?v=10', 'tracking.js?v=10', 'manifest.webmanifest',
   'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 ['spades', 'hearts', 'diamonds', 'clubs'].forEach(s => ['ace', 2, 3, 4, 5, 6, 7, 8, 9, 10, 'jack', 'queen', 'king'].forEach(r => { FILES.push(`cards/${r}_of_${s}.png`); FILES.push(`cards/groot/${r}_of_${s}.png`); }));
 

@@ -25,3 +25,37 @@ De klassieke kaartafbeeldingen (map `cards/`) komen uit *Vector Playing Cards* v
 - `manifest.webmanifest`, `sw.js`, `icons/` – beginscherm-icoon en offline werken
 
 Bij een nieuwe versie: verhoog `CACHE` in `sw.js` (en `?v=` in `index.html`) zodat iPhones de update meteen ophalen.
+
+## Speeltijd voor de familie
+
+Patience gebruikt een **eigen** Firebase Realtime Database (`patience-opa`, België), los van Mahjong.
+`tracking-config.js` bevat alleen het database-adres. Publiceer `firebase/rules.json` in de Firebase-console
+voordat je delen gebruikt; de nieuw aangemaakte database staat aanvankelijk op slot.
+
+Eenmalig op opa's apparaat: **Menu → Speeltijd delen → Speeltijd delen**. Bewaar de privélink die daar
+verschijnt op je eigen telefoon/computer. Het overzicht toont recente activiteit, de laatste speeltijd,
+speeltijd vandaag/afgelopen week, spellen begonnen en gewonnen, en recente speelmomenten. Alleen dit
+apparaat wordt gevolgd; gewone bezoekers en andere installaties delen standaard niets.
+
+De privélink is de toegangssleutel, zonder inloggen. De sleutel wordt willekeurig op het apparaat gemaakt
+en staat niet in de gepubliceerde code. Iedereen met de link kan de gegevens lezen (en via de database-API
+ook wijzigen). De database als geheel is niet leesbaar. Deel de link alleen met familie.
+Stoppen met delen kan in hetzelfde menu; bestaande gegevens en de privélink blijven bewaard.
+
+Er wordt één klein record per speelmoment opgeslagen: begintijd, laatste activiteit, seconden, aantal
+begonnen/gewonnen spellen en actief/niet actief. Geen kaarten, zettenlogboek, naam of apparaatdetails.
+Hetzelfde record wordt elke 30 seconden bijgewerkt; herhaalde verzending maakt geen dubbele records.
+Speeltijd is een schatting: zichtbaar spel, buiten menu's, tot maximaal twee minuten na het laatste
+kaartcontact. Achtergrondtijd en lange onderbrekingen van de browsertimer tellen niet mee. Een spel wordt
+pas bij de eerste zet als begonnen geteld; verder spelen na een pauze telt niet als nieuw spel.
+
+Zonder internet wachten maximaal 500 samenvattingen lokaal op verzending (oudste vervallen daarna).
+Een plots afgesloten app kan de laatste seconden missen; live activiteit vervalt na 75 seconden zonder
+update. Het dashboard laadt alleen de laatste 90 dagen; oudere records blijven in Firebase bewaard.
+Na het laden ontvangt het dashboard alleen gewijzigde records via een liveverbinding, zodat het
+speelverleden niet elke halve minuut opnieuw wordt gedownload. De verbinding stopt in een verborgen tab.
+Bij 20 speelmomenten per dag blijft de ruwe recordinhoud ongeveer 1 MB per jaar, exclusief databasesleutels
+en transport. Updates voegen geen nieuwe records toe. Tijden/daggrenzen gebruiken Europe/Amsterdam.
+
+Controle: `node --test tests/*.test.cjs` (offline sync, herhaald verzenden, inactiviteit,
+achtergrondtijd, herstel na afsluiten, uitschakelen, middernacht en live dashboardupdates).

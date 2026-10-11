@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Opa's Patience · Speeloverzicht</title>
+<link rel="icon" href="../icons/favicon-32.png">
+<style>
+:root { color-scheme: light dark; --bg:#f3f5f1; --card:#fff; --ink:#18342a; --muted:#66766e; --line:#dce4dd; --green:#187747; }
+@media(prefers-color-scheme:dark) { :root { --bg:#121b16; --card:#1c2921; --ink:#ecf4ed; --muted:#a5b8ab; --line:#34493b; --green:#71d897; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,sans-serif; }
+main { max-width:940px; margin:auto; padding:28px 18px 60px; }
+header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+h1 { margin:0; font-size:26px; } h2 { margin:0 0 14px; font-size:18px; }
+p { color:var(--muted); } .sub { margin:5px 0 24px; }
+#status { border:1px solid var(--line); border-radius:30px; padding:8px 14px; font-weight:650; }
+#status.live { color:var(--green); } #status.live::before { content:'● '; }
+.cards { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:24px 0; }
+.card,section { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; }
+.card span { color:var(--muted); font-size:14px; } .card b { display:block; font-size:28px; margin-top:8px; }
+section { margin-top:16px; } table { width:100%; border-collapse:collapse; text-align:left; font-size:15px; }
+td,th { padding:12px 6px; border-bottom:1px solid var(--line); } th { color:var(--muted); font-weight:500; }
+.bar-row { display:grid; grid-template-columns:90px 1fr 85px; align-items:center; gap:12px; padding:9px 0; }
+.bar { height:14px; background:var(--line); border-radius:10px; overflow:hidden; }.bar i { display:block; height:100%; background:var(--green); border-radius:10px; }
+input,button { font:inherit; padding:10px 14px; border-radius:9px; border:1px solid var(--line); } input { width:100%; background:var(--bg); color:var(--ink); }
+button { margin-top:12px; background:var(--green); color:var(--bg); cursor:pointer; font-weight:650; }
+.note { font-size:13px; } #notice { margin:20px 0; } [hidden] { display:none !important; }
+.scroll { overflow:auto; }
+@media(max-width:580px) { .cards { grid-template-columns:1fr; gap:10px; } .card { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; } .card b { margin:0; font-size:24px; } h1 { font-size:23px; } }
+</style>
+</head>
+<body><main>
+<header><h1>♠ Opa's Patience</h1><div id="status" role="status">Verbinding maken…</div></header>
+<p class="sub">Wanneer en hoe lang opa speelt</p>
+<div id="notice" role="status"></div>
+<section id="connect" hidden>
+  <h2>Open het privéoverzicht</h2>
+  <p>Zet op opa's apparaat <b>Menu → Speeltijd delen</b> aan en bewaar de privélink die daar verschijnt. Plak die link hieronder om het overzicht te openen.</p>
+  <form id="connectForm"><label for="privateLink">Privélink</label><input id="privateLink" type="text" autocomplete="off" spellcheck="false" required><button>Overzicht openen</button></form>
+  <p class="note">Iedereen met de privélink kan deze speelgegevens bekijken. Deel hem alleen met familie.</p>
+</section>
+<div id="overview" hidden>
+  <div class="cards">
+    <div class="card"><span>Vandaag gespeeld</span><b id="todayTime">—</b></div>
+    <div class="card"><span>Afgelopen 7 dagen</span><b id="weekTime">—</b></div>
+    <div class="card"><span>Vandaag begonnen</span><b id="todayGames">—</b></div>
+  </div>
+  <section><h2>Laatst gespeeld</h2><div id="lastPlayed">Nog geen speelgegevens</div></section>
+  <section><h2>Speeltijd per dag</h2><div id="days"></div></section>
+  <section><h2>Recente speelmomenten</h2><div class="scroll"><table><thead><tr><th>Wanneer</th><th>Speeltijd</th><th>Begonnen</th><th>Gewonnen</th></tr></thead><tbody id="sessions"></tbody></table></div></section>
+  <p class="note">Tijden in Nederland. Speeltijd is een schatting: het spel is zichtbaar, menu's zijn dicht en opa heeft in de laatste 2 minuten een kaart aangeraakt. Online wordt het overzicht elke 30 seconden bijgewerkt. Zonder internet volgen de gegevens later; “nu aan het spelen” kan dan niet worden vastgesteld. Alleen de laatste 90 dagen worden geladen.</p>
+</div>
+</main>
+<script src="../tracking-config.js?v=10"></script>
+<script src="dashboard.js?v=10"></script>
+</body></html>
