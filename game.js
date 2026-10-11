@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
@@ -394,6 +394,7 @@ function analyse(limit = 80000) {
   return { stuck: true, first: null };
 }
 
+const clockMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
 /* ================= Solver (smart hint) =================
    The game knows every card, including the face-down ones and the order of the stock.
    We search (depth-first, with sensible move ordering and pruning) for a sequence of moves that
@@ -522,7 +523,7 @@ function solve(budgetMs = 900, mode = 'dfs') {
     }
     return A.concat(B, C, E, F);
   };
-  const t0 = performance.now();
+  const t0 = clockMs();
   if (mode === 'best') {
     // best-first: always expand the most promising position (cards up, cards uncovered)
     const score = st => 12 * (st.fc[0] + st.fc[1] + st.fc[2] + st.fc[3]) - 9 * st.down.reduce((x, y) => x + y, 0) - 0.5 * (st.stock.length + st.waste.length) + 2 * st.tab.filter(p => !p.length).length;
@@ -532,22 +533,22 @@ function solve(budgetMs = 900, mode = 'dfs') {
     push({ st: root, acts: null, parent: null, f: score(root), g: 0 });
     let n = 0;
     while (heap.length) {
-      if ((++n & 127) === 0 && performance.now() - t0 > budgetMs) return { path: null, timedOut: true, nodes: n, ms: Math.round(performance.now() - t0) };
+      if (((++n & 127) === 0 && clockMs() - t0 > budgetMs) || n > budgetMs * 400) return { path: null, timedOut: true, nodes: n, ms: Math.round(clockMs() - t0) };
       const node = pop();
-      if (won(node.st)) { const path = []; for (let x = node; x && x.acts; x = x.parent) path.unshift(...x.acts); return { path, timedOut: false, nodes: n, ms: Math.round(performance.now() - t0) }; }
+      if (won(node.st)) { const path = []; for (let x = node; x && x.acts; x = x.parent) path.unshift(...x.acts); return { path, timedOut: false, nodes: n, ms: Math.round(clockMs() - t0) }; }
       for (const m of moves(node.st)) {
         const [ns, acts] = apply(node.st, m);
         const k = key(ns); if (seenB.has(k)) continue; seenB.add(k);
         push({ st: ns, acts, parent: node, f: score(ns) - 0.02 * (node.g + 1), g: node.g + 1 });
       }
     }
-    return { path: null, timedOut: false, nodes: n, ms: Math.round(performance.now() - t0) };
+    return { path: null, timedOut: false, nodes: n, ms: Math.round(clockMs() - t0) };
   }
   const seen = new Set();
   let nodes = 0, timedOut = false;
   const dfs = (st, depth) => {
     if (won(st)) return [];
-    if ((++nodes & 255) === 0 && performance.now() - t0 > budgetMs) { timedOut = true; return null; }
+    if (((++nodes & 255) === 0 && clockMs() - t0 > budgetMs) || nodes > budgetMs * 400) { timedOut = true; return null; }
     if (depth > 500) return null;
     const k = key(st); if (seen.has(k)) return null; seen.add(k);
     for (const m of moves(st)) {
@@ -559,7 +560,7 @@ function solve(budgetMs = 900, mode = 'dfs') {
     return null;
   };
   const path = dfs(root, 0);
-  return { path, timedOut, nodes, ms: Math.round(performance.now() - t0) };
+  return { path, timedOut, nodes, ms: Math.round(clockMs() - t0) };
 }
 
 /* turn a solver action into the on-screen hint */
@@ -722,13 +723,41 @@ function newGame(confirmFirst, sameSeed) {
   if (inProgress) { ST['d' + G.draw].streak = 0; saveStats(); }
   endTracking(sameSeed ? 'restart' : 'new_game');
   stopWinAnimation();
-  const seed = sameSeed && G ? G.seed : (Math.random() * 2 ** 31) | 0;
-  G = newGameState(seed, S.draw, S.vegas);
-  G.playId = playTracking?.newRound();
-  H = []; hintIdx = 0; stuckShown = false;
-  saveGame();
-  dealAnimation();
-  updateHud(); updateBar();
+  const deal = seed => {
+    G = newGameState(seed, S.draw, S.vegas);
+    G.playId = playTracking?.newRound();
+    H = []; hintIdx = 0; stuckShown = false;
+    saveGame();
+    dealAnimation();
+    updateHud(); updateBar();
+  };
+  if (sameSeed && G) { deal(G.seed); return; }
+  // only deal games that can be won: shuffle until the solver finds a winning line
+  if (!G) { deal(findWinnableSeed(S.draw, S.vegas)); return; }   // very first game: deal right away
+  busy = true;
+  toast('Kaarten schudden…');
+  setTimeout(() => {
+    let seed;
+    try { seed = findWinnableSeed(S.draw, S.vegas); } finally { busy = false; }
+    hideToast();
+    deal(seed);
+  }, 30);
+}
+
+function findWinnableSeed(draw, vegas, maxMs = 6000) {
+  const keep = G, t0 = clockMs();
+  let seed = (Math.random() * 2 ** 31) | 0;
+  try {
+    for (let tries = 0; tries < 60; tries++) {
+      seed = (Math.random() * 2 ** 31) | 0;
+      G = newGameState(seed, draw, vegas);
+      let sol = solve(300, 'dfs');
+      if (!sol.path && sol.timedOut) sol = solve(300, 'best');
+      if (sol.path) return seed;
+      if (clockMs() - t0 > maxMs) break;   // very unlikely: give a normal deal rather than wait
+    }
+    return seed;
+  } finally { G = keep; }
 }
 
 /* ================= Layout & rendering ================= */
@@ -1542,6 +1571,6 @@ function boot() {
   }
 }
 // testing hook
-window.__patience = { solve, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
+window.__patience = { solve, findWinnableSeed, get busy() { return busy; }, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
 boot();
 })();
