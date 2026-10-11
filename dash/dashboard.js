@@ -26,7 +26,7 @@ function bookmark() {
   const queryString = query.toString();
   history.replaceState(null, '', location.pathname + (queryString ? '?' + queryString : '') + '#' + key);
 }
-const expandedSessions = new Set();
+const expandedSessions = new Set(), expandedDays = new Set();
 let records = [], cache = Object.create(null), stream = null, connected = false;
 let players = Object.create(null), directory = null, directoryLoaded = false;
 const validKey = key => /^[a-f0-9]{32}$/.test(key || '');
@@ -98,7 +98,9 @@ function render() {
     if (dayKey(r.last) < weekDays[6]) return;
     // Split the measured time proportionally if a session spans a clock/date boundary.
     const span = Math.max(1, r.last - r.start);
-    for (let t = r.start; t < r.last;) {
+    if (r.detail?.v === 2) {
+      const entry = totals.get(dayKey(r.start)); if (entry) entry.seconds += r.seconds;
+    } else for (let t = r.start; t < r.last;) {
       const end = Math.min(r.last, (Math.floor(t / 60000) + 1) * 60000);
       const d = dayKey(t), entry = totals.get(d);
       if (entry) entry.seconds += r.seconds * (end - t) / span;
@@ -151,6 +153,7 @@ function render() {
       summary.textContent = isSudoku ? `${levels[r.level]}${r.daily ? ' · dagelijks' : ''} · ${r.hints} hints · ${r.mistakes} fouten` : 'Bekijk spelacties'; details.appendChild(summary);
       const add = text => { const line = document.createElement('p'); line.textContent = text; details.appendChild(line); };
       add(`Begonnen: ${r.games} · Gewonnen / voltooid: ${r.wins} · Laatste activiteit: ${dateTime(r.last)} · Eindmelding: ${d.ended ? dateTime(d.ended) : 'nog geen eindmelding'}`);
+      if (d.v === 2) add('Samengevoegd per poging per dag. Onderbrekingen: ' + (Object.entries(d.stops || {}).filter(([k]) => k !== 'midnight').map(([k, n]) => `${endings[k]}: ${n}×`).join(' · ') || 'nog geen') + '.');
       add(Object.entries(d.actions || {}).map(([k, n]) => `${actionNames[k]}: ${n}`).join(' · ') || 'Geen spelacties gemeten');
       add(`Laatste spelactie: ${actionNames[d.lastAction] || 'Niet gemeten'}${d.actionAt ? ' om ' + dateTime(d.actionAt) : ''}. Langste tijd zonder spelactie: ${duration(d.maxGap)} (maximaal 2 min).`);
       add(`Voortgang sinds ${dateTime(d.lastProgressAt)} niet verder toegenomen. Dit meet ${isSudoku ? 'goed ingevulde vakjes' : 'kaarten op de stapels boven'}, niet alle nuttige zetten.`);
@@ -163,6 +166,7 @@ function render() {
     row.appendChild(detailCell); $('sessions').appendChild(row);
   });
   renderInsights(visible, now);
+  renderHistory(visible, now);
 }
 function ending(r, now) {
   if (!r.detail) return 'Niet gemeten (oude versie)';
@@ -171,12 +175,20 @@ function ending(r, now) {
   return endings[reason] || endings.unknown;
 }
 function validDetail(d, r) {
-  if (!d || d.v !== 1 || !validKey(d.round) || !Object.prototype.hasOwnProperty.call(endings, d.reason)) return false;
+  if (!d || ![1, 2].includes(d.v) || !validKey(d.round) || !Object.prototype.hasOwnProperty.call(endings, d.reason)) return false;
   if (!['progress', 'initial', 'total', 'maxGap', 'actionAt', 'lastProgressAt'].every(k => Number.isInteger(d[k]) && d[k] >= 0)) return false;
   if (d.total < 1 || d.total > 81 || d.progress > d.total || d.initial > d.total || d.maxGap > 120) return false;
   if (d.lastProgressAt < r.start || d.lastProgressAt > r.last || d.actionAt !== 0 && (d.actionAt < r.start || d.actionAt > r.last)) return false;
   if (d.ended !== undefined && (!Number.isInteger(d.ended) || d.ended < r.last)) return false;
   if (d.reason !== 'playing' && d.ended === undefined || d.lastAction !== 'none' && !Object.prototype.hasOwnProperty.call(actionNames, d.lastAction)) return false;
+  if (d.v === 2) {
+    for (const [field, allowed, max] of [
+      ['stops', k => k !== 'playing' && Object.prototype.hasOwnProperty.call(endings, k), 10000],
+      ['hours', k => /^h([01][0-9]|2[0-3])$/.test(k), 90000]
+    ]) if (d[field] !== undefined && (!d[field] || typeof d[field] !== 'object' || Array.isArray(d[field]) ||
+      !Object.entries(d[field]).every(([k, n]) => allowed(k) && Number.isInteger(n) && n >= 1 && n <= max))) return false;
+    if (Object.values(d.hours || {}).reduce((sum, n) => sum + n, 0) > r.seconds) return false;
+  }
   return d.actions === undefined || d.actions && typeof d.actions === 'object' && !Array.isArray(d.actions) && Object.entries(d.actions).every(([k, n]) => Object.prototype.hasOwnProperty.call(actionNames, k) && Number.isInteger(n) && n >= 0 && n <= 10000);
 }
 function bars(id, entries, formatter = duration) {
@@ -191,8 +203,8 @@ function bars(id, entries, formatter = duration) {
 function renderInsights(visible, now) {
   const cutoff = now - periodDays * 86400000;
   const selected = visible.filter(r => r.last >= cutoff);
-  const measured = selected.filter(r => r.detail), actual = measured.filter(r => r.detail.reason !== 'midnight');
-  $('coverage').textContent = `${selected.length} ${selected.length === 1 ? 'speelblok' : 'speelblokken'} in ${periodDays} dagen; ${measured.length} met uitgebreide metingen. Een pauze of menu kan een spel in meerdere blokken splitsen. Oudere blokken missen deze extra gegevens.`;
+  const measured = selected.filter(r => r.detail), actual = measured.filter(r => r.detail.v === 2 || r.detail.reason !== 'midnight');
+  $('coverage').textContent = `${selected.length} ${selected.length === 1 ? 'meetrecord' : 'meetrecords'} in ${periodDays} dagen; ${measured.length} met uitgebreide metingen. Hervattingen staan bij dezelfde poging; de geschiedenis hieronder is per dag gegroepeerd. Oude gegevens blijven beschikbaar.`;
   const lengths = actual.map(r => r.seconds).sort((a, b) => a - b);
   const median = lengths.length ? (lengths[Math.floor((lengths.length - 1) / 2)] + lengths[Math.floor(lengths.length / 2)]) / 2 : 0;
   $('typicalTime').textContent = lengths.length ? duration(median) : 'Nog geen metingen';
@@ -202,14 +214,25 @@ function renderInsights(visible, now) {
   $('observedRounds').textContent = rounds.size;
   $('observedCompleted').textContent = [...rounds.values()].filter(list => list.some(r => r.wins > 0)).length;
   const hours = Array(24).fill(0), weekdays = new Map(['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map(d => [d, 0]));
+  const heat = Object.fromEntries([...weekdays.keys()].map(d => [d, Array(24).fill(0)]));
   for (const r of selected) {
+    if (r.detail?.v === 2) {
+      const weekday = weekdayFormatter.format(r.start).replace('.', '');
+      if (weekdays.has(weekday)) weekdays.set(weekday, weekdays.get(weekday) + r.seconds);
+      for (const [h, seconds] of Object.entries(r.detail.hours || {})) {
+        const hour = Number(h.slice(1)); hours[hour] += seconds;
+        if (heat[weekday]) heat[weekday][hour] += seconds;
+      }
+      continue;
+    }
     const span = Math.max(1, r.last - r.start);
     // Allocate measured play proportionally; the summary does not contain an event timeline.
     for (let t = Math.max(r.start, cutoff); t < r.last;) {
       const end = Math.min(r.last, (Math.floor(t / 3600000) + 1) * 3600000), seconds = r.seconds * (end - t) / span;
-      hours[Number(hourFormatter.format(t)) % 24] += seconds;
+      const hour = Number(hourFormatter.format(t)) % 24;
+      hours[hour] += seconds;
       const weekday = weekdayFormatter.format(t).replace('.', '');
-      if (weekdays.has(weekday)) weekdays.set(weekday, weekdays.get(weekday) + seconds);
+      if (weekdays.has(weekday)) { weekdays.set(weekday, weekdays.get(weekday) + seconds); heat[weekday][hour] += seconds; }
       t = end;
     }
   }
@@ -217,8 +240,17 @@ function renderInsights(visible, now) {
   $('preferredTimes').textContent = hours.some(n => n > 0) ? `Meeste gemeten speeltijd: ${String(peakHour).padStart(2, '0')}:00–${String((peakHour + 1) % 24).padStart(2, '0')}:00; weekdag: ${peakDay[0]}. Bekijk de verdeling hieronder; bij gelijke waarden wordt één piek getoond.` : 'Nog geen speeltijd om uren of weekdagen te vergelijken.';
   bars('hours', hours.map((n, h) => [`${String(h).padStart(2, '0')}:00`, n]));
   bars('weekdays', [...weekdays]);
+  renderHeatmap(heat);
   const counts = new Map();
-  for (const r of actual) { const label = ending(r, now); counts.set(label, (counts.get(label) || 0) + 1); }
+  for (const r of actual) {
+    if (r.detail.v === 2) {
+      for (const [reason, n] of Object.entries(r.detail.stops || {})) {
+        if (reason === 'midnight') continue;
+        const label = endings[reason]; counts.set(label, (counts.get(label) || 0) + n);
+      }
+      if (r.detail.reason === 'playing' && ending(r, now) === endings.unknown) counts.set(endings.unknown, (counts.get(endings.unknown) || 0) + 1);
+    } else { const label = ending(r, now); counts.set(label, (counts.get(label) || 0) + 1); }
+  }
   bars('endings', [...counts].sort((a, b) => b[1] - a[1]), n => `${n}×`);
   $('endingEmpty').hidden = !!actual.length;
   const actions = {};
@@ -241,7 +273,8 @@ function renderInsights(visible, now) {
   }
   $('signals').replaceChildren();
   const signal = text => { const p = document.createElement('p'); p.textContent = text; $('signals').appendChild(p); };
-  const lost = actual.filter(r => r.detail.reason === 'lost').length, stuck = actual.filter(r => r.detail.reason === 'stuck').length;
+  const stopCount = reason => actual.reduce((n, r) => n + (r.detail.v === 2 ? r.detail.stops?.[reason] || 0 : Number(r.detail.reason === reason)), 0);
+  const lost = stopCount('lost'), stuck = stopCount('stuck');
   if (actions.blocked) signal(`${actions.blocked} kaartacties leverden geen zet op. Dit kan een ongeldige zet of een lastig aanraakdoel zijn. Bekijk de laatste actie en voortgang voordat je de bediening aanpast.`);
   if (lost) signal(`${lost} ${lost === 1 ? 'speelblok eindigde' : 'speelblokken eindigden'} bij de foutenlimiet. Vergelijk Sudoku-niveaus en de 3-fouteninstelling om te zien waar extra uitleg of een mildere limiet kan helpen.`);
   if (stuck) signal(`${stuck} ${stuck === 1 ? 'speelblok eindigde' : 'speelblokken eindigden'} met de melding Geen zetten meer. Controleer of de opties Nieuw spel, Opnieuw en Terug duidelijk genoeg zijn.`);
@@ -250,6 +283,72 @@ function renderInsights(visible, now) {
   if (actions.hint) signal(`${actions.hint} hints gebruikt in de gemeten blokken. Vergelijk hints per niveau en voortgang om te beoordelen waar de uitleg nuttiger kan.`);
   if (!measured.length) signal('Nieuwe spelinformatie verschijnt automatisch na het spelen met de bijgewerkte apps. Persoonlijke redenen zoals moe of geen tijd kunnen de apps niet vaststellen.');
   else signal('Menu, pauze, scherm uit en inactiviteit zijn waargenomen appgebeurtenissen. Ze bewijzen geen frustratie, verveling of andere persoonlijke reden. Open pogingen kunnen later nog worden voltooid; de tabel is geen definitief winstpercentage.');
+}
+function renderHeatmap(heat) {
+  const parent = $('heatmap'); parent.replaceChildren();
+  const max = Math.max(1, ...Object.values(heat).flat());
+  const corner = document.createElement('span'); parent.appendChild(corner);
+  for (let h = 0; h < 24; h++) {
+    const label = document.createElement('span'); label.textContent = h % 3 === 0 ? String(h).padStart(2, '0') : '';
+    parent.appendChild(label);
+  }
+  for (const [day, values] of Object.entries(heat)) {
+    const label = document.createElement('span'); label.textContent = day; parent.appendChild(label);
+    values.forEach((seconds, h) => {
+      const cell = document.createElement('span');
+      cell.className = 'heat-cell heat-' + (seconds > 0 ? Math.min(5, 1 + Math.floor(seconds / max * 4)) : 0);
+      cell.title = `${day} ${String(h).padStart(2, '0')}:00–${String((h + 1) % 24).padStart(2, '0')}:00 · ${duration(seconds)}`;
+      cell.setAttribute?.('aria-label', cell.title);
+      parent.appendChild(cell);
+    });
+  }
+}
+function renderHistory(visible, now) {
+  const parent = $('history'); parent.replaceChildren();
+  const cutoff = now - periodDays * 86400000, days = new Map();
+  for (const r of visible.filter(r => r.last >= cutoff).sort((a, b) => b.last - a.last)) {
+    const day = dayKey(r.start);
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(r);
+  }
+  if (!days.size) { const empty = document.createElement('p'); empty.className = 'note'; empty.textContent = 'Nog geen speelmomenten in deze periode.'; parent.appendChild(empty); return; }
+  for (const [day, list] of [...days].sort((a, b) => b[0].localeCompare(a[0]))) {
+    const details = document.createElement('details'), summary = document.createElement('summary');
+    const expansionKey = key + ':' + day;
+    details.className = 'history-day'; details.open = expandedDays.has(expansionKey);
+    details.addEventListener('toggle', () => { if (details.open) expandedDays.add(expansionKey); else expandedDays.delete(expansionKey); });
+    const title = document.createElement('strong'), stats = document.createElement('span');
+    title.textContent = new Intl.DateTimeFormat('nl-NL', {timeZone: zone, weekday:'short',day:'numeric',month:'short'}).format(Date.parse(day + 'T12:00:00Z'));
+    stats.textContent = `${duration(list.reduce((n,r) => n+r.seconds,0))} actief · ${list.reduce((n,r)=>n+r.games,0)} begonnen · ${list.reduce((n,r)=>n+r.wins,0)} voltooid`;
+    summary.append(title, stats); details.appendChild(summary);
+    const attempts = new Map();
+    for (const r of list) {
+      const id = appOf(r) + ':' + (r.detail?.round || r._id);
+      if (!attempts.has(id)) attempts.set(id, []);
+      attempts.get(id).push(r);
+    }
+    for (const attempt of attempts.values()) {
+      const latest = attempt[0], earliest = attempt.reduce((a,b) => a.start < b.start ? a : b), card = document.createElement('article');
+      card.className = 'attempt';
+      const heading = document.createElement('h3'), time = document.createElement('p'), status = document.createElement('p'), actions = document.createElement('p');
+      const d = latest.detail, isSudoku = appOf(latest) === 'sudoku';
+      heading.textContent = isSudoku ? `Sudoku · ${levels[latest.level]}${latest.daily ? ' · dagelijks' : ''}` : `Patience${d?.mode ? ' · ' + (d.mode.endsWith('3') ? '3 kaarten' : '1 kaart') + (d.mode.startsWith('vegas') ? ' · Vegas' : '') : ''}`;
+      time.className = 'note'; time.textContent = `${dateTime(earliest.start)} → ${dateTime(latest.last)} · ${duration(attempt.reduce((n,r)=>n+r.seconds,0))} actief`;
+      status.textContent = ending(latest, now) + (d ? ` · voortgang ${Math.round((earliest.detail?.initial || 0) / d.total * 100)} → ${Math.round(d.progress / d.total * 100)}%` : ' · extra metingen ontbreken');
+      const counts = {}, stops = {};
+      for (const r of attempt) {
+        for (const [k,n] of Object.entries(r.detail?.actions || {})) counts[k] = (counts[k] || 0) + n;
+        if (r.detail?.v === 2) { for (const [k,n] of Object.entries(r.detail.stops || {})) stops[k] = (stops[k] || 0) + n; }
+        else if (r.detail && !['playing','midnight'].includes(r.detail.reason)) stops[r.detail.reason] = (stops[r.detail.reason] || 0) + 1;
+      }
+      actions.className = 'note'; actions.textContent = Object.entries(counts).map(([k,n])=>`${actionNames[k]} ${n}×`).join(' · ') || 'Geen uitgebreide spelacties beschikbaar';
+      card.append(heading,time,status,actions);
+      if (Object.keys(stops).length) { const pause = document.createElement('p'); pause.className='note'; pause.textContent=Object.entries(stops).filter(([k])=>k!=='midnight').map(([k,n])=>`${endings[k]} ${n}×`).join(' · '); card.appendChild(pause); }
+      if (!d) { const legacy = document.createElement('p'); legacy.className='note'; legacy.textContent='Oud meetrecord: zonder pogingcode kunnen we niet bepalen of dit hetzelfde spel was.'; card.appendChild(legacy); }
+      details.appendChild(card);
+    }
+    parent.appendChild(details);
+  }
 }
 function put(target, path, data) {
   const parts = path.split('/').filter(Boolean);

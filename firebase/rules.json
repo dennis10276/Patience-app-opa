@@ -50,7 +50,7 @@
           "detail": {
             ".validate": "newData.hasChildren(['v', 'round', 'reason', 'progress', 'initial', 'total', 'lastAction', 'actionAt', 'lastProgressAt', 'maxGap']) && (!data.exists() || newData.child('round').val() === data.child('round').val()) && (newData.child('reason').val() === 'playing' || newData.hasChild('ended'))",
             "v": {
-              ".validate": "newData.val() === 1"
+              ".validate": "newData.val() === 1 || newData.val() === 2"
             },
             "round": {
               ".validate": "newData.isString() && newData.val().matches(/^[a-f0-9]{32}$/)"
@@ -149,6 +149,16 @@
             },
             "ended": {
               ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= newData.parent().parent().child('last').val() && newData.val() <= now + 300000"
+            },
+            "stops": {
+              "$reason": {
+                ".validate": "newData.parent().parent().child('v').val() === 2 && $reason.matches(/^(unknown|won|lost|stuck|new_game|restart|menu|pause|hidden|closed|idle|suspended|midnight|recovered)$/) && newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 1 && newData.val() <= 10000"
+              }
+            },
+            "hours": {
+              "$hour": {
+                ".validate": "newData.parent().parent().child('v').val() === 2 && $hour.matches(/^h([01][0-9]|2[0-3])$/) && newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 1 && newData.val() <= 90000"
+              }
             }
           }
         }

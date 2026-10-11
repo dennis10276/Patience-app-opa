@@ -126,3 +126,24 @@ Elke 30 seconden wordt hetzelfde compacte record vervangen; offline wachtrijen b
 Reken met grofweg 0,5–1 kB ruwe inhoud per uitgebreid blok (afhankelijk van gebruikte acties), exclusief
 sleutels en transport. Bij twintig blokken per dag is dat ongeveer 4–8 MB per jaar. Het dashboard laadt
 nog steeds maximaal 90 dagen; ouder materiaal wordt niet automatisch uit Firebase verwijderd.
+
+
+## Compacte speelrecords (detail v2)
+
+Nieuwe metingen gebruiken één record per poging per Nederlandse dag en browsertab. Pauze, menu,
+scherm uit en inactiviteit werken hetzelfde record bij als daarna dezelfde poging wordt hervat.
+Een herstart of nieuw spel krijgt een nieuwe poging; een daggrens krijgt een nieuw dagrecord.
+Een tab bewaart zijn laatst gebruikte record ook bij herladen. Afzonderlijke tabs voegen hun tellers
+niet samen, zodat gelijktijdig spelen geen gegevens overschrijft. Zonder sessionStorage werkt de
+tracking nog steeds, maar kan herladen een extra record maken.
+
+`detail.stops` bewaart begrensde tellers per waargenomen onderbreking/einde; `detail.hours` bewaart
+maximaal 24 actieve-seconden-tellers (`h00`–`h23`, Europe/Amsterdam). Pauzetijd wordt niet verdeeld
+over de tussenliggende uren. Alleen de laatste eindmelding houdt een tijdstip; er is geen log per pauze.
+Een record blijft ongeveer 0,5–1,5 kB, afhankelijk van het aantal gebruikte tellers. Herhaald pauzeren
+dupliceert de metadata niet meer. Elke 30 seconden wordt hetzelfde record bijgewerkt.
+
+Oude records en testspelers worden niet verwijderd of herschreven. Het dashboard accepteert beide
+detailversies. Validatie wordt uitgebreid voor de twee begrensde tellerkaarten; lees-/schrijfrechten blijven gelijk.
+
+Het dashboard groepeert de geschiedenis per dag en poging, met compacte grafieken en een uur/weekdag-heatmap zoals Mahjong. De technische meetrecords zijn standaard ingeklapt. Losse oude records zonder pogingcode worden niet op basis van een gok samengevoegd tot één spel.
