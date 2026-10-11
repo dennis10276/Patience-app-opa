@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
@@ -327,18 +327,21 @@ function analyse(limit = 80000) {
   const clone = st => ({ tab: st.tab.map(p => p.slice()), stock: st.stock.slice(), waste: st.waste.slice(), fc: st.fc.slice(), passes: st.passes, first: st.first });
   const seen = new Set([key(root)]);
   const queue = [root];
+  const fcRoot = fc0[0] + fc0[1] + fc0[2] + fc0[3];
+  const fcSum = st => st.fc[0] + st.fc[1] + st.fc[2] + st.fc[3];
   let qi = 0, rootFirst = null;
   while (qi < queue.length) {
     if (seen.size > limit) return { stuck: false, unknown: true, first: rootFirst };
     const st = queue[qi++];
     const tag = mv => st.first || mv;
-    // progress moves
+    // progress moves: a card up (only counts if it means MORE cards up than now), or a closed card turned
+    const upCounts = fcSum(st) + 1 > fcRoot;
     for (let t = 0; t < 7; t++) {
       const p = st.tab[t];
-      if (p.length && goesUp(st, p[p.length - 1])) return { stuck: false, first: tag({ type: 'move', ids: [p[p.length - 1]], toType: 'found' }) };
+      if (upCounts && p.length && goesUp(st, p[p.length - 1])) return { stuck: false, first: tag({ type: 'move', ids: [p[p.length - 1]], toType: 'found' }) };
     }
     const w = st.waste.length ? st.waste[st.waste.length - 1] : -1;
-    if (w >= 0 && goesUp(st, w)) return { stuck: false, first: tag({ type: 'move', ids: [w], toType: 'found' }) };
+    if (upCounts && w >= 0 && goesUp(st, w)) return { stuck: false, first: tag({ type: 'move', ids: [w], toType: 'found' }) };
     for (let s = 0; s < 7; s++) {
       const p = st.tab[s];
       if (p.length && down[s] > 0) {
@@ -369,6 +372,11 @@ function analyse(limit = 80000) {
     if (w >= 0) for (let t = 0; t < 7; t++) if (fits(st, w, t)) {
       const ns = clone(st); ns.tab[t].push(ns.waste.pop());
       push(ns, { type: 'move', ids: [w], toType: 'tab', toIdx: t });
+    }
+    if (!upCounts) {
+      for (let t = 0; t < 7; t++) { const p = st.tab[t]; const c = p[p.length - 1];
+        if (p.length && goesUp(st, c)) { const ns = clone(st); ns.tab[t].pop(); ns.fc[suitOf(c)]++; push(ns, { type: 'move', ids: [c], toType: 'found' }); } }
+      if (w >= 0 && goesUp(st, w)) { const ns = clone(st); ns.waste.pop(); ns.fc[suitOf(w)]++; push(ns, { type: 'move', ids: [w], toType: 'found' }); }
     }
     // foundation back to tableau
     for (let k = 0; k < 4; k++) if (st.fc[k] > 0) {
@@ -410,6 +418,7 @@ function solve(budgetMs = 900, mode = 'dfs') {
     stock: G.stock.slice(), waste: G.waste.slice(), fc: fc0, passes: G.passes
   };
   const key = st => st.tab.map((p, i) => st.down[i] + ':' + p.join(',')).join('|') + '/' + st.stock.join(',') + '/' + st.waste.join(',') + '/' + st.fc.join(',') + (vegas ? '/' + st.passes : '');
+  if (mode === 'key') return key(root);
   const clone = st => ({ tab: st.tab.map(p => p.slice()), down: st.down.slice(), stock: st.stock.slice(), waste: st.waste.slice(), fc: st.fc.slice(), passes: st.passes });
   const fits = (st, c, t) => {
     const p = st.tab[t];
@@ -456,6 +465,8 @@ function solve(budgetMs = 900, mode = 'dfs') {
     }
   };
   const won = st => st.fc[0] + st.fc[1] + st.fc[2] + st.fc[3] === 52;
+  // the position before each action of a found line, so the hint can keep following the same plan
+  const keysFor = path => { const ks = []; const st = clone(root); for (const a of path) { ks.push(key(st)); doMove(st, a); } return ks; };
   // every card that can be brought to the top of the waste by drawing (with the number of draws needed)
   const reachable = st => {
     const out = []; const seenTop = new Set();
@@ -535,7 +546,7 @@ function solve(budgetMs = 900, mode = 'dfs') {
     while (heap.length) {
       if (((++n & 127) === 0 && clockMs() - t0 > budgetMs) || n > budgetMs * 400) return { path: null, timedOut: true, nodes: n, ms: Math.round(clockMs() - t0) };
       const node = pop();
-      if (won(node.st)) { const path = []; for (let x = node; x && x.acts; x = x.parent) path.unshift(...x.acts); return { path, timedOut: false, nodes: n, ms: Math.round(clockMs() - t0) }; }
+      if (won(node.st)) { const path = []; for (let x = node; x && x.acts; x = x.parent) path.unshift(...x.acts); return { path, keys: keysFor(path), timedOut: false, nodes: n, ms: Math.round(clockMs() - t0) }; }
       for (const m of moves(node.st)) {
         const [ns, acts] = apply(node.st, m);
         const k = key(ns); if (seenB.has(k)) continue; seenB.add(k);
@@ -560,7 +571,7 @@ function solve(budgetMs = 900, mode = 'dfs') {
     return null;
   };
   const path = dfs(root, 0);
-  return { path, timedOut, nodes, ms: Math.round(clockMs() - t0) };
+  return { path, keys: path ? keysFor(path) : null, timedOut, nodes, ms: Math.round(clockMs() - t0) };
 }
 
 /* turn a solver action into the on-screen hint */
@@ -583,25 +594,67 @@ function hint() {
   toast('Even nadenken…');
   setTimeout(() => { try { smartHint(); } finally { hintBusy = false; } }, 40);
 }
-function smartHint() {
-  // 1) a winning line (knows all cards, so it never leads you into a dead end)
+let plan = null;   // the winning line we are currently hinting: { seed, path, keys }
+/* next move of a winning line from the current position (null if none found) */
+function planNextAction() {
+  // keep following the plan we already showed, so hints never go in circles
+  const here = solve(0, 'key');
+  if (plan && plan.seed === G.seed) {
+    const i = plan.keys.indexOf(here);
+    if (i >= 0) return plan.path[i];
+  }
   let sol = solve(500, 'dfs');
-  if (!sol.path && sol.timedOut) sol = solve(650, 'best');
-  if (sol.path && sol.path.length) { hideToast(); showSolverMove(sol.path[0]); return; }
+  if (!sol.path && sol.timedOut) sol = solve(900, 'best');
+  if (sol.path && sol.path.length) { plan = { seed: G.seed, path: sol.path, keys: sol.keys }; return sol.path[0]; }
+  return null;
+}
+function smartHint() {
+  // 1) the next move of a winning line (knows all cards, so it never leads into a dead end)
+  const act = planNextAction();
+  if (act) { hideToast(); showSolverMove(act); return; }
+  // 2) no winning line from here: find the last position (going back) from which it can still be won
+  const back = findWinnableBack();
   hideToast();
-  // 2) no win found in time: shortest way to real progress (a card up, or a closed card turned)
+  if (back) {
+    const n = back.steps;
+    sfx('hint');
+    dialog('Zo lukt het niet meer', `<p>Vanaf hier is dit spel niet meer te winnen.</p>
+      <p>Als je <b>${n} ${n === 1 ? 'zet' : 'zetten'}</b> terug gaat, kun je het nog wel winnen. De hint helpt je daarna verder.</p>`, [
+      { label: `${n} ${n === 1 ? 'zet' : 'zetten'} terug`, primary: true, action: () => {
+        closeDialog();
+        for (let k = 0; k < n; k++) undo();
+        plan = { seed: G.seed, path: back.sol.path, keys: back.sol.keys };
+        setTimeout(() => showSolverMove(back.sol.path[0]), speedMs() + 150);
+      } },
+      { label: 'Nieuw spel', action: () => { closeDialog(); newGame(false); } },
+      { label: 'Sluiten', action: closeDialog }
+    ]);
+    return;
+  }
+  // 3) nothing found: shortest way to real progress (more cards up, or a closed card turned)
   const a = analyse();
   if (a.stuck) { noMoves(); return; }
   const m = a.first;
-  if (m && m.type === 'move') {
-    showHintMove(m.ids, m.toType, m.toType === 'found' ? foundTarget(m.ids[0]) : m.toIdx);
-    return;
-  }
+  if (m && m.type === 'move') { showHintMove(m.ids, m.toType, m.toType === 'found' ? foundTarget(m.ids[0]) : m.toIdx); return; }
   if (m && m.type === 'draw') { showSolverMove({ t: 'draw' }); return; }
-  // 3) search too large to finish: best simple move
   const moves = usefulMoves();
   if (moves.length) { const u = moves[0]; showHintMove(u.ids, u.toType, u.toIdx); return; }
   showSolverMove({ t: 'draw' });
+}
+
+/* look back through the undo history for the most recent position that can still be won */
+function findWinnableBack(maxBack = 60, maxMs = 5000) {
+  const keep = G, t0 = clockMs();
+  try {
+    for (let j = H.length - 1, steps = 1; j >= 0 && steps <= maxBack; j--, steps++) {
+      if (clockMs() - t0 > maxMs) break;
+      G = JSON.parse(H[j]);
+      let sol = solve(250, 'dfs');
+      if (!sol.path && sol.timedOut) sol = solve(300, 'best');
+      if (sol.path && sol.path.length) return { steps, sol };
+    }
+    return null;
+  } finally { G = keep; }
 }
 
 function showHintMove(ids, toType, toIdx) {
@@ -1571,6 +1624,6 @@ function boot() {
   }
 }
 // testing hook
-window.__patience = { solve, findWinnableSeed, get busy() { return busy; }, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
+window.__patience = { planNextAction, solve, findWinnableBack, smartHint, get plan() { return plan; }, findWinnableSeed, get busy() { return busy; }, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
 boot();
 })();
