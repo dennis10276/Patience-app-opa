@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.12.0';
+const VERSION = '1.13.0';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
@@ -310,13 +310,14 @@ function usefulMoves() {
    the foundation or a face-down card gets turned over. If no reachable position allows progress,
    the game can never be won and we say so. If the search is too large to finish, we never claim
    "stuck" (unknown = not stuck). */
-function analyse(limit = 80000) {
+function analyse(limit = 80000, opts = {}) {
   const draw = G.draw, maxP = maxPasses(), vegas = G.vegas;
   const fc0 = [0, 0, 0, 0];
   G.found.forEach(p => p.forEach(c => fc0[suitOf(c)]++));
   const down = G.tab.map(p => p.filter(c => !G.up[c]).length);
   const root = { tab: G.tab.map(p => p.filter(c => G.up[c])), stock: G.stock.slice(), waste: G.waste.slice(), fc: fc0, passes: G.passes, first: null };
   const key = st => st.tab.map(p => p.join(',')).join('|') + '/' + st.stock.join(',') + '/' + st.waste.join(',') + '/' + st.fc.join(',') + '/' + (vegas ? st.passes : 0);
+  if (opts.keyOnly) return key(root);
   const fits = (st, c, t) => {
     const p = st.tab[t];
     if (!p.length) return down[t] === 0 && rankOf(c) === 13;
@@ -336,12 +337,18 @@ function analyse(limit = 80000) {
     const tag = mv => st.first || mv;
     // progress moves: a card up (only counts if it means MORE cards up than now), or a closed card turned
     const upCounts = fcSum(st) + 1 > fcRoot;
+    // at the start: a card up that just recreates a position from a moment ago is no progress (no circles)
+    const backHere = (c, from) => {
+      if (st !== root || !opts.avoid) return false;
+      const ns = clone(st); if (from < 0) ns.waste.pop(); else ns.tab[from].pop(); ns.fc[suitOf(c)]++;
+      return opts.avoid.has(key(ns));
+    };
     for (let t = 0; t < 7; t++) {
       const p = st.tab[t];
-      if (upCounts && p.length && goesUp(st, p[p.length - 1])) return { stuck: false, first: tag({ type: 'move', ids: [p[p.length - 1]], toType: 'found' }) };
+      if (upCounts && p.length && goesUp(st, p[p.length - 1]) && !backHere(p[p.length - 1], t)) return { stuck: false, first: tag({ type: 'move', ids: [p[p.length - 1]], toType: 'found' }) };
     }
     const w = st.waste.length ? st.waste[st.waste.length - 1] : -1;
-    if (upCounts && w >= 0 && goesUp(st, w)) return { stuck: false, first: tag({ type: 'move', ids: [w], toType: 'found' }) };
+    if (upCounts && w >= 0 && goesUp(st, w) && !backHere(w, -1)) return { stuck: false, first: tag({ type: 'move', ids: [w], toType: 'found' }) };
     for (let s = 0; s < 7; s++) {
       const p = st.tab[s];
       if (p.length && down[s] > 0) {
@@ -349,6 +356,7 @@ function analyse(limit = 80000) {
       }
     }
     const push = (ns, mv) => {
+      if (st === root && opts.avoid && opts.avoid.has(key(ns))) return; // never send him back to where he just was
       if (!ns.first) ns.first = mv;
       if (!rootFirst) rootFirst = mv;
       const k = key(ns);
@@ -595,45 +603,59 @@ function hint() {
   setTimeout(() => { try { smartHint(); } finally { hintBusy = false; } }, 40);
 }
 let plan = null;   // the winning line we are currently hinting: { seed, path, keys }
-/* next move of a winning line from the current position (null if none found) */
+/* next move of a winning line from the current position.
+   { act } = next move of a winning line, { lost:true } = searched everything, no win from here,
+   { unknown:true } = search ran out of time */
 function planNextAction() {
   // keep following the plan we already showed, so hints never go in circles
   const here = solve(0, 'key');
   if (plan && plan.seed === G.seed) {
     const i = plan.keys.indexOf(here);
-    if (i >= 0) return plan.path[i];
+    if (i >= 0) return { act: plan.path[i] };
   }
   let sol = solve(500, 'dfs');
   if (!sol.path && sol.timedOut) sol = solve(900, 'best');
-  if (sol.path && sol.path.length) { plan = { seed: G.seed, path: sol.path, keys: sol.keys }; return sol.path[0]; }
-  return null;
+  if (sol.path && sol.path.length) { plan = { seed: G.seed, path: sol.path, keys: sol.keys }; return { act: sol.path[0] }; }
+  return sol.timedOut ? { unknown: true } : { lost: true };
+}
+/* positions he was in during the last few moves (to never hint a move straight back) */
+function recentPositions(n = 12) {
+  const keep = G, out = new Set();
+  try {
+    out.add(analyse(0, { keyOnly: true }));
+    for (let j = H.length - 1; j >= 0 && j >= H.length - n; j--) { G = JSON.parse(H[j]); out.add(analyse(0, { keyOnly: true })); }
+  } catch (e) { /* ignore */ } finally { G = keep; }
+  return out;
 }
 function smartHint() {
   // 1) the next move of a winning line (knows all cards, so it never leads into a dead end)
-  const act = planNextAction();
-  if (act) { hideToast(); showSolverMove(act); return; }
-  // 2) no winning line from here: find the last position (going back) from which it can still be won
-  const back = findWinnableBack();
-  hideToast();
-  if (back) {
-    const n = back.steps;
+  const r = planNextAction();
+  if (r.act) { hideToast(); showSolverMove(r.act); return; }
+  if (r.lost) {
+    // 2) no winning line from here: find the last position (going back) from which it can still be won
+    const back = findWinnableBack();
+    hideToast();
     sfx('hint');
-    dialog('Zo lukt het niet meer', `<p>Vanaf hier is dit spel niet meer te winnen.</p>
-      <p>Als je <b>${n} ${n === 1 ? 'zet' : 'zetten'}</b> terug gaat, kun je het nog wel winnen. De hint helpt je daarna verder.</p>`, [
-      { label: `${n} ${n === 1 ? 'zet' : 'zetten'} terug`, primary: true, action: () => {
-        closeDialog();
-        for (let k = 0; k < n; k++) undo();
-        plan = { seed: G.seed, path: back.sol.path, keys: back.sol.keys };
-        setTimeout(() => showSolverMove(back.sol.path[0]), speedMs() + 150);
-      } },
-      { label: 'Nieuw spel', action: () => { closeDialog(); newGame(false); } },
-      { label: 'Sluiten', action: closeDialog }
-    ]);
+    const n = back ? back.steps : 0;
+    const btns = [];
+    if (back) btns.push({ label: `${n} ${n === 1 ? 'zet' : 'zetten'} terug`, primary: true, action: () => {
+      closeDialog();
+      for (let k = 0; k < n; k++) undo();
+      plan = { seed: G.seed, path: back.sol.path, keys: back.sol.keys };
+      setTimeout(() => showSolverMove(back.sol.path[0]), speedMs() + 150);
+    } });
+    btns.push({ label: 'Dit spel opnieuw', primary: !back, action: () => { closeDialog(); newGame(false, true); } });
+    btns.push({ label: 'Nieuw spel', action: () => { closeDialog(); newGame(false); } });
+    btns.push({ label: 'Sluiten', action: closeDialog });
+    dialog('Zo lukt het niet meer', `<p>Ik zie vanaf hier geen manier meer om dit spel te winnen.</p>` + (back
+      ? `<p>Als je <b>${n} ${n === 1 ? 'zet' : 'zetten'}</b> terug gaat, kan het nog wel. De hint helpt je daarna verder.</p>`
+      : `<p>Je kunt dit spel opnieuw beginnen (dezelfde kaarten) of een nieuw spel kiezen.</p>`), btns);
     return;
   }
-  // 3) nothing found: shortest way to real progress (more cards up, or a closed card turned)
-  const a = analyse();
-  if (a.stuck) { noMoves(); return; }
+  // 3) search ran out of time: shortest way to real progress, but never straight back to a recent position
+  hideToast();
+  const a = analyse(80000, { avoid: recentPositions() });
+  if (a.stuck) { if (analyse().stuck) { noMoves(); return; } toast('Ik zie geen nieuwe goede zet. Probeer Terug, of tik op de stapel.'); return; }
   const m = a.first;
   if (m && m.type === 'move') { showHintMove(m.ids, m.toType, m.toType === 'found' ? foundTarget(m.ids[0]) : m.toIdx); return; }
   if (m && m.type === 'draw') { showSolverMove({ t: 'draw' }); return; }
@@ -642,18 +664,29 @@ function smartHint() {
   showSolverMove({ t: 'draw' });
 }
 
-/* look back through the undo history for the most recent position that can still be won */
-function findWinnableBack(maxBack = 60, maxMs = 5000) {
-  const keep = G, t0 = clockMs();
+/* look back through the undo history for the most recent position that can still be won.
+   If a position can be won, every earlier one can too, so a binary search finds it quickly. */
+function findWinnableBack(maxMs = 7000) {
+  const keep = G, t0 = clockMs(), n = H.length;
+  const memo = new Map();
+  const proven = j => {
+    if (memo.has(j)) return memo.get(j);
+    G = JSON.parse(H[j]);
+    let sol = solve(300, 'dfs');
+    if (!sol.path && sol.timedOut) sol = solve(350, 'best');
+    const r = sol.path && sol.path.length ? sol : null;
+    memo.set(j, r);
+    return r;
+  };
   try {
-    for (let j = H.length - 1, steps = 1; j >= 0 && steps <= maxBack; j--, steps++) {
-      if (clockMs() - t0 > maxMs) break;
-      G = JSON.parse(H[j]);
-      let sol = solve(250, 'dfs');
-      if (!sol.path && sol.timedOut) sol = solve(300, 'best');
-      if (sol.path && sol.path.length) return { steps, sol };
+    if (!n) return null;
+    if (!proven(0)) return null;
+    let lo = 0, hi = n - 1;            // lo is proven winnable
+    while (lo < hi && clockMs() - t0 < maxMs) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (proven(mid)) lo = mid; else hi = mid - 1;
     }
-    return null;
+    return { steps: n - lo, sol: memo.get(lo) };
   } finally { G = keep; }
 }
 
@@ -1624,6 +1657,6 @@ function boot() {
   }
 }
 // testing hook
-window.__patience = { planNextAction, solve, findWinnableBack, smartHint, get plan() { return plan; }, findWinnableSeed, get busy() { return busy; }, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
+window.__patience = { planNextAction, recentPositions, solve, findWinnableBack, smartHint, get plan() { return plan; }, findWinnableSeed, get busy() { return busy; }, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
 boot();
 })();
