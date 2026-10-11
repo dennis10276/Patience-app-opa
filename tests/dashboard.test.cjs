@@ -3,13 +3,13 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'dash', 'dashboard.js'), 'utf8');
-function dashboard(hash = '#' + 'a'.repeat(32), saved = new Map()) {
+function dashboard(hash = '#' + 'a'.repeat(32), saved = new Map(), search = '') {
   let now = Date.parse('2026-10-11T22:30:00Z');
   const nodes = new Map(), intervals = [], streams = [], listeners = {};
   const node = () => ({ textContent: '', value: '', children: [], style: {}, classList: { toggle() {} }, appendChild(c) { this.children.push(c); }, append(...c) { this.children.push(...c); }, replaceChildren() { this.children = []; } });
   const context = {
     Date: class extends Date { static now() { return now; } }, Intl, URLSearchParams, AbortController, setTimeout, clearTimeout,
-    location: { hash }, history: { replaceState(a, b, hash) { context.location.hash = hash; } },
+    location: { hash, search }, history: { replaceState(a, b, value) { const [query, hash] = value.split('#'); context.location.hash = '#' + hash; context.location.search = query; } },
     localStorage: { getItem: k => saved.get(k), setItem: (k, v) => saved.set(k, v) },
     async fetch(url, options) { return { ok: true }; },
     PATIENCE_TRACKING: { databaseUrl: 'https://example.firebasedatabase.app' },
@@ -119,4 +119,48 @@ test('renaming updates Firebase and preserves the selected player', async () => 
   assert.equal(request.data.name, 'Opa');
   assert.equal(a.nodes.get('who').value, id);
   assert.equal(a.nodes.get('nameStatus').textContent, 'Naam opgeslagen.');
+});
+
+test('combined totals include both games and filters keep their histories separate', () => {
+  const a = dashboard(), s = a.streams[0];
+  const common = { start: a.now - 600000, last: a.now, seconds: 600, games: 1, wins: 1, active: false };
+  const sudoku = { ...common, app: 'sudoku', level: 'hard', daily: true, hints: 2, mistakes: 1, active: true };
+  s.emit('put', { path: '/', data: { patience: common, sudoku } });
+  assert.equal(a.nodes.get('todayTime').textContent, '20 min');
+  assert.equal(a.nodes.get('weekWins').textContent, 2);
+  assert.equal(a.nodes.get('sudokuHints').textContent, 2);
+  assert.equal(a.nodes.get('sessions').children.length, 2);
+  a.nodes.get('game').value = 'patience'; a.nodes.get('game').onchange();
+  assert.equal(a.nodes.get('todayTime').textContent, '10 min');
+  assert.equal(a.nodes.get('todayGames').textContent, '1 spel');
+  assert.equal(a.nodes.get('status').textContent, 'Nu niet actief');
+  assert.equal(a.nodes.get('sessions').children.length, 1);
+  assert.equal(a.nodes.get('levelHeader').hidden, true);
+  a.nodes.get('game').value = 'sudoku'; a.nodes.get('game').onchange();
+  assert.equal(a.nodes.get('status').textContent, 'Speelt nu Sudoku');
+  assert.equal(a.nodes.get('sessions').children[0].children[5].textContent, 'Moeilijk · Dagelijks');
+  assert.equal(a.nodes.get('levelHeader').hidden, false);
+  assert.equal(a.streams.length, 2, 'filtering reuses the stream instead of downloading history again');
+  assert.equal(a.context.location.search, '?game=sudoku');
+});
+
+test('Sudoku filter bookmarks override remembered games and keep the player on switch', () => {
+  const saved = new Map([['opa.dashboard.game', 'patience']]);
+  const a = dashboard('#' + 'a'.repeat(32), saved, '?game=sudoku');
+  assert.equal(a.nodes.get('game').value, 'sudoku');
+  a.nodes.get('who').value = 'b'.repeat(32); a.nodes.get('who').onchange();
+  assert.equal(a.context.location.search, '?game=sudoku');
+  assert.equal(a.context.location.hash, '#' + 'b'.repeat(32));
+  const b = dashboard('#' + 'a'.repeat(32), saved);
+  assert.equal(b.nodes.get('game').value, 'patience');
+});
+
+test('unknown apps and malformed Sudoku metadata are ignored', () => {
+  const a = dashboard(), common = { start: a.now, last: a.now, seconds: 0, games: 1, wins: 0, active: false };
+  a.streams[0].emit('put', { path: '/', data: {
+    legacy: common, unknown: { ...common, app: 'other' }, missing: { ...common, app: 'sudoku' },
+    fractional: { ...common, app: 'sudoku', level: 'easy', daily: false, hints: 0.5, mistakes: 0 }
+  } });
+  assert.equal(a.nodes.get('sessions').children.length, 1);
+  assert.equal(a.nodes.get('todayGames').textContent, '1 spel');
 });

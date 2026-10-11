@@ -7,6 +7,20 @@ const timeFormatter = new Intl.DateTimeFormat('nl-NL', { timeZone: zone, day: 'n
 const dayKey = t => dayFormatter.format(t);
 const dateTime = t => timeFormatter.format(t);
 const duration = s => s < 60 ? `${Math.floor(s)} sec` : s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} u ${Math.floor(s % 3600 / 60)} min`;
+const levels = { easy: 'Makkelijk', medium: 'Gemiddeld', hard: 'Moeilijk', expert: 'Expert', master: 'Meester', extreme: 'Extreem' };
+const validGame = game => ['all', 'patience', 'sudoku'].includes(game);
+const params = new URLSearchParams(location.search || '');
+let game = params.get('game');
+if (!validGame(game)) { try { game = localStorage.getItem('opa.dashboard.game'); } catch (_) {} }
+if (!validGame(game)) game = 'all';
+$('game').value = game;
+const appOf = record => record.app || 'patience';
+function bookmark() {
+  const query = new URLSearchParams(location.search || '');
+  if (game === 'all') query.delete('game'); else query.set('game', game);
+  const queryString = query.toString();
+  history.replaceState(null, '', (queryString ? '?' + queryString : '') + '#' + key);
+}
 let records = [], cache = Object.create(null), stream = null, connected = false;
 let players = Object.create(null), directory = null, directoryLoaded = false;
 const validKey = key => /^[a-f0-9]{32}$/.test(key || '');
@@ -20,7 +34,7 @@ function choose(next) {
     cache = Object.create(null); records = []; connected = false;
   }
   key = next;
-  history.replaceState(null, '', '#' + key);
+  bookmark();
   try { localStorage.setItem('patience.dashboard.player', key); } catch (_) {}
   $('who').value = key;
   $('playerName').value = players[key]?.name || '';
@@ -43,6 +57,13 @@ function fillPicker() {
   else { $('who').value = key; $('overview').hidden = false; $('naming').hidden = false; refresh(); }
 }
 $('who').onchange = () => choose($('who').value);
+$('game').onchange = () => {
+  if (!validGame($('game').value)) return;
+  game = $('game').value;
+  try { localStorage.setItem('opa.dashboard.game', game); } catch (_) {}
+  if (key) bookmark();
+  render();
+};
 addEventListener('hashchange', () => { const next = location.hash.slice(1); if (validKey(next)) { choose(next); fillPicker(); } });
 $('nameForm').onsubmit = async e => {
   e.preventDefault();
@@ -60,10 +81,14 @@ $('nameForm').onsubmit = async e => {
   finally { clearTimeout(timeout); $('saveName').disabled = false; }
 };
 function render() {
+  const visible = records.filter(r => game === 'all' || appOf(r) === game);
+  const showSudoku = game !== 'patience';
+  ['levelHeader', 'hintsHeader', 'mistakesHeader'].forEach(id => { $(id).hidden = !showSudoku; });
+  $('gameSummary').textContent = game === 'sudoku' ? 'Sudoku' : game === 'patience' ? 'Patience' : 'Patience en Sudoku samen';
   const now = Date.now(), today = dayKey(now);
   const weekDays = Array.from({ length: 7 }, (_, i) => new Date(Date.parse(`${today}T12:00:00Z`) - i * 86400000).toISOString().slice(0, 10));
-  const totals = new Map(weekDays.map(d => [d, { seconds: 0, games: 0 }]));
-  records.forEach(r => {
+  const totals = new Map(weekDays.map(d => [d, { seconds: 0, games: 0, wins: 0, hints: 0, mistakes: 0 }]));
+  visible.forEach(r => {
     if (dayKey(r.last) < weekDays[6]) return;
     // Split the measured time proportionally if a session spans a clock/date boundary.
     const span = Math.max(1, r.last - r.start);
@@ -75,16 +100,25 @@ function render() {
     }
     const entry = totals.get(dayKey(r.start));
     if (entry) entry.games += r.games;
+    // Completed puzzles and actions belong to the day of the session's last activity.
+    const endEntry = totals.get(dayKey(r.last));
+    if (endEntry) { endEntry.wins += r.wins; endEntry.hints += r.hints || 0; endEntry.mistakes += r.mistakes || 0; }
   });
   $('todayTime').textContent = duration(totals.get(today).seconds);
   $('weekTime').textContent = duration([...totals.values()].reduce((n, d) => n + d.seconds, 0));
+  $('weekWins').textContent = [...totals.values()].reduce((n, d) => n + d.wins, 0);
+  const sudoku = visible.filter(r => appOf(r) === 'sudoku' && totals.has(dayKey(r.last)));
+  $('sudokuSummary').hidden = !showSudoku;
+  $('sudokuHints').textContent = sudoku.reduce((n, r) => n + r.hints, 0);
+  $('sudokuMistakes').textContent = sudoku.reduce((n, r) => n + r.mistakes, 0);
   const gamesToday = totals.get(today).games;
   $('todayGames').textContent = `${gamesToday} ${gamesToday === 1 ? 'spel' : 'spellen'}`;
-  const latest = records.reduce((a, b) => !a || b.last > a.last ? b : a, null);
-  const live = connected && records.some(r => r.active && now >= r.last && now - r.last < 75000);
-  $('status').textContent = !connected ? 'Geen verbinding' : live ? 'Nu aan het spelen' : 'Nu niet actief';
+  const latest = visible.reduce((a, b) => !a || b.last > a.last ? b : a, null);
+  const active = connected ? visible.filter(r => r.active && now >= r.last && now - r.last < 75000) : [];
+  const live = !!active.length;
+  $('status').textContent = !key ? 'Nog geen spelers' : !connected ? 'Geen verbinding' : live ? (game === 'all' ? 'Nu aan het spelen' : `Speelt nu ${game === 'sudoku' ? 'Sudoku' : 'Patience'}`) : 'Nu niet actief';
   $('status').classList.toggle('live', live);
-  $('lastPlayed').textContent = latest ? `${dateTime(latest.last)} · ${duration(latest.seconds)}` : 'Nog geen speelgegevens. Nieuwe speelmomenten verschijnen automatisch zodra opa speelt.';
+  $('lastPlayed').textContent = latest ? `${dateTime(latest.last)} · ${appOf(latest) === 'sudoku' ? 'Sudoku' : 'Patience'} · ${duration(latest.seconds)}` : 'Nog geen speelgegevens voor deze keuze. Nieuwe speelmomenten verschijnen automatisch zodra opa speelt.';
   const max = Math.max(60, ...[...totals.values()].map(d => d.seconds));
   $('days').replaceChildren();
   [...weekDays].reverse().forEach(d => {
@@ -96,9 +130,12 @@ function render() {
     row.append(label, bar, time); $('days').appendChild(row);
   });
   $('sessions').replaceChildren();
-  [...records].sort((a, b) => b.start - a.start).slice(0, 40).forEach(r => {
+  [...visible].sort((a, b) => b.start - a.start).slice(0, 40).forEach(r => {
     const row = document.createElement('tr');
-    [dateTime(r.start), duration(r.seconds), r.games, r.wins].forEach(value => { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
+    const isSudoku = appOf(r) === 'sudoku';
+    const values = [dateTime(r.start), isSudoku ? 'Sudoku' : 'Patience', duration(r.seconds), r.games, r.wins];
+    if (showSudoku) values.push(isSudoku ? levels[r.level] + (r.daily ? ' · Dagelijks' : '') : '—', isSudoku ? r.hints : '—', isSudoku ? r.mistakes : '—');
+    values.forEach(value => { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
     $('sessions').appendChild(row);
   });
 }
@@ -123,7 +160,7 @@ function apply(target, event, patch) {
 function update(event, patch) {
   try {
     cache = apply(cache, event, patch);
-    records = Object.values(cache).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k])) && r.last >= r.start && r.last - r.start <= 90000000 && r.seconds >= 0 && r.seconds <= 90000 && r.games >= 0 && r.games <= 1000 && r.wins >= 0 && r.wins <= 1000 && typeof r.active === 'boolean');
+    records = Object.values(cache).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k])) && r.start >= 1577836800000 && r.last >= r.start && r.last - r.start <= 90000000 && r.seconds >= 0 && r.seconds <= 90000 && r.games >= 0 && r.games <= 1000 && r.wins >= 0 && r.wins <= 1000 && typeof r.active === 'boolean' && (r.app === undefined || r.app === 'sudoku') && (r.app !== 'sudoku' || Object.prototype.hasOwnProperty.call(levels, r.level) && typeof r.daily === 'boolean' && ['hints', 'mistakes'].every(k => Number.isInteger(r[k]) && r[k] >= 0 && r[k] <= 1000)));
     connected = true; $('notice').textContent = ''; render();
   } catch (_) { $('notice').textContent = 'Een update kon niet worden gelezen.'; }
 }

@@ -10,7 +10,7 @@
         ],
         "$session": {
           ".write": "$key.matches(/^[a-f0-9]{32}$/) && $session.matches(/^[a-f0-9]{32}$/) && newData.exists()",
-          ".validate": "newData.hasChildren(['start', 'last', 'seconds', 'games', 'wins', 'active']) && (!data.exists() || newData.child('start').val() === data.child('start').val())",
+          ".validate": "newData.hasChildren(['start', 'last', 'seconds', 'games', 'wins', 'active']) && (!data.exists() || newData.child('start').val() === data.child('start').val()) && (!data.exists() || newData.child('app').val() === data.child('app').val()) && (newData.child('app').val() !== 'sudoku' || newData.hasChildren(['level', 'daily', 'hints', 'mistakes']))",
           "start": {
             ".validate": "newData.isNumber() && newData.val() >= 1577836800000 && newData.val() <= now + 300000 && newData.val() % 1 === 0"
           },
@@ -31,6 +31,21 @@
           },
           "$other": {
             ".validate": false
+          },
+          "app": {
+            ".validate": "newData.isString() && newData.val() === 'sudoku'"
+          },
+          "level": {
+            ".validate": "newData.parent().child('app').val() === 'sudoku' && newData.isString() && (newData.val() === 'easy' || newData.val() === 'medium' || newData.val() === 'hard' || newData.val() === 'expert' || newData.val() === 'master' || newData.val() === 'extreme')"
+          },
+          "daily": {
+            ".validate": "newData.parent().child('app').val() === 'sudoku' && newData.isBoolean()"
+          },
+          "hints": {
+            ".validate": "newData.parent().child('app').val() === 'sudoku' && newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 1000"
+          },
+          "mistakes": {
+            ".validate": "newData.parent().child('app').val() === 'sudoku' && newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 1000"
           }
         }
       }
