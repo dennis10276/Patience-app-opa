@@ -147,3 +147,5 @@ Oude records en testspelers worden niet verwijderd of herschreven. Het dashboard
 detailversies. Validatie wordt uitgebreid voor de twee begrensde tellerkaarten; lees-/schrijfrechten blijven gelijk.
 
 Het dashboard groepeert de geschiedenis per dag en poging, met compacte grafieken en een uur/weekdag-heatmap zoals Mahjong. De technische meetrecords zijn standaard ingeklapt. Losse oude records zonder pogingcode worden niet op basis van een gok samengevoegd tot één spel.
+
+Automatische browserruns (`navigator.webdriver`) sturen geen speelgegevens of spelersprofielen naar Firebase. Handmatig spelen, inclusief DennisTEST, blijft automatisch gemeten.

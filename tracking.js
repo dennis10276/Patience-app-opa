@@ -1,6 +1,8 @@
 /* Compact session summaries and observed gameplay signals; no board or move log. */
 (() => {
 'use strict';
+// Automated browser runs must not create real players or gameplay history.
+if (navigator.webdriver === true) return;
 const KEY = 'patience.sharing.v1', QUEUE = 'patience.sessions.v1';
 const CURSOR = 'patience.play-record.v2';
 const IDLE = 120000, HEARTBEAT = 30000, MAX_PENDING = 500;

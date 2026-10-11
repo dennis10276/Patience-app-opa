@@ -64,6 +64,8 @@ test('root dashboard discovers players and prefers Opa without a code', () => {
   const a = dashboard(''), id = 'b'.repeat(32);
   assert.ok(a.streams[0].url.endsWith('/players.json'));
   a.streams[0].emit('put', { path: '/', data: { ['a'.repeat(32)]: { device: 'Computer' }, [id]: { device: 'iPad', name: 'Opa' } } });
+  assert.equal(a.nodes.get('who').children.length, 1);
+  a.nodes.get('devicesToggle').onclick();
   assert.equal(a.nodes.get('who').children.length, 2);
   assert.equal(a.nodes.get('who').value, id);
   assert.equal(a.context.location.hash, '#' + id);
@@ -308,4 +310,16 @@ test('history groups a day and merges resumed attempts while preserving expansio
   day=a.nodes.get('history').children[0]; assert.equal(day.open,true);
   a.nodes.get('who').value='b'.repeat(32); a.nodes.get('who').onchange();
   assert.match(a.nodes.get('history').children[0].textContent,/Nog geen/);
+});
+
+
+test('known players stay visible, unnamed devices are optional and bookmarked devices stay accessible', () => {
+  const a = dashboard(''), opa='a'.repeat(32), dennis='b'.repeat(32), other='c'.repeat(32);
+  a.streams[0].emit('put',{path:'/',data:{[opa]:{name:'Opa',device:'iPhone'},[dennis]:{name:'DennisTEST',device:'Computer'},[other]:{device:'iPhone'}}});
+  assert.equal(a.nodes.get('who').children.length,2);
+  assert.match(a.nodes.get('devicesToggle').textContent,/\(1\)/);
+  a.nodes.get('devicesToggle').onclick(); assert.equal(a.nodes.get('who').children.length,3);
+  a.nodes.get('who').value=other; a.nodes.get('who').onchange();
+  a.nodes.get('devicesToggle').onclick();
+  assert.equal(a.nodes.get('who').value,other); assert.equal(a.nodes.get('who').children.length,3);
 });

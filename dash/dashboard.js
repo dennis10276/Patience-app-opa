@@ -28,6 +28,7 @@ function bookmark() {
 }
 const expandedSessions = new Set(), expandedDays = new Set();
 let records = [], cache = Object.create(null), stream = null, connected = false;
+let showAllDevices = false;
 let players = Object.create(null), directory = null, directoryLoaded = false;
 const validKey = key => /^[a-f0-9]{32}$/.test(key || '');
 let key = validKey(location.hash.slice(1)) ? location.hash.slice(1) : '';
@@ -49,7 +50,12 @@ function choose(next) {
   render(); refresh();
 }
 function fillPicker() {
-  const list = Object.entries(players).filter(([id, p]) => validKey(id) && p && typeof p === 'object');
+  const all = Object.entries(players).filter(([id, p]) => validKey(id) && p && typeof p === 'object');
+  const named = p => typeof p.name === 'string' && p.name.trim();
+  const unnamed = all.filter(([,p]) => !named(p)), hasNamed = all.some(([,p]) => named(p));
+  const list = all.filter(([id,p]) => showAllDevices || named(p) || id === key || !hasNamed);
+  $('devicesToggle').hidden = !unnamed.length;
+  $('devicesToggle').textContent = showAllDevices ? 'Alleen bekende spelers' : `Andere apparaten tonen (${unnamed.length})`;
   // Preserve old bookmarked links, including devices that have not received the update yet.
   if (key && !list.some(([id]) => id === key)) list.push([key, {}]);
   const label = (id, p) => `${typeof p.name === 'string' && p.name.trim() ? p.name.trim().slice(0, 40) : p.device || 'Apparaat'} · ${id.slice(0, 8)}`;
@@ -64,6 +70,7 @@ function fillPicker() {
 }
 $('period').onchange = () => { if ([7, 30, 90].includes(Number($('period').value))) { periodDays = Number($('period').value); render(); } };
 $('who').onchange = () => choose($('who').value);
+$('devicesToggle').onclick = () => { showAllDevices = !showAllDevices; fillPicker(); };
 $('game').onchange = () => {
   if (!validGame($('game').value)) return;
   game = $('game').value;
