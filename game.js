@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
@@ -134,8 +134,18 @@ function maxPasses() { return G.vegas ? (G.draw === 1 ? 1 : 3) : Infinity; }
 function canRecycle() { return G.waste.length > 0 && G.passes < maxPasses(); }
 
 /* ================= Actions ================= */
+function trackingDetails() {
+  if (!G) return {};
+  if (!G.playId) G.playId = playTracking?.newRound();
+  return { round: G.playId, build: VERSION, mode: (G.vegas ? 'vegas' : 'draw') + G.draw,
+    progress: G.found.reduce((n, p) => n + p.length, 0), total: 52, score: G.score, gameSeconds: G.time,
+    tapMove: !!S.tapMove, autoFinish: !!S.autoFinish };
+}
+function endTracking(reason) { playTracking?.state(trackingDetails()); playTracking?.stop(reason); }
+function trackAction(name) { startClock(); playTracking?.action(name, trackingDetails()); saveGame(); }
 function startClock() {
-  playTracking?.touch(!G.counted);
+  const started = G.trackingStarted == null ? G.counted : G.trackingStarted;
+  if (playTracking?.touch(!started, trackingDetails())) G.trackingStarted = true;
   if (!G.started) { G.started = true; }
   if (!G.counted) {
     G.counted = true;
@@ -182,6 +192,7 @@ function moveCards(ids, from, toType, toIdx) {
     if (p.length && !G.up[top(p)]) { G.up[top(p)] = 1; if (!G.vegas) addScore(5); setTimeout(() => sfx('flip'), speedMs() * .6); }
   }
   G.moves++;
+  playTracking?.action('move', trackingDetails());
   hintIdx = 0; stuckShown = false;
   liftCards(ids);
   sfx(toType === 'found' ? 'found' : 'place');
@@ -190,6 +201,7 @@ function moveCards(ids, from, toType, toIdx) {
 
 function drawStock() {
   if (busy || G.won) return;
+  const action = G.stock.length ? 'draw' : 'recycle';
   if (G.stock.length) {
     pushHistory(); startClock();
     const n = Math.min(G.draw, G.stock.length);
@@ -200,24 +212,26 @@ function drawStock() {
     liftCards(ids);
     sfx('draw');
   } else if (G.waste.length) {
-    if (!canRecycle()) { toast(G.vegas ? 'Je mag in Vegas niet meer opnieuw door de stapel' : 'Geen kaarten meer'); sfx('bad'); return; }
+    if (!canRecycle()) { trackAction('blocked'); toast(G.vegas ? 'Je mag in Vegas niet meer opnieuw door de stapel' : 'Geen kaarten meer'); sfx('bad'); return; }
     pushHistory(); startClock();
     while (G.waste.length) { const c = G.waste.pop(); G.up[c] = 0; G.stock.push(c); }
     G.passes++; G.fan = 0; G.moves++;
     if (!G.vegas) addScore(G.draw === 1 ? -100 : -20);
     sfx('shuffle');
   } else return;
+  playTracking?.action(action, trackingDetails());
   hintIdx = 0; stuckShown = false;
   afterChange();
 }
 
 function undo() {
   if (busy || !H.length || G.won) return;
-  playTracking?.touch();
+  startClock();
   const prev = JSON.parse(H.pop());
-  const keep = { time: G.time, counted: G.counted, started: G.started };
+  const keep = { time: G.time, counted: G.counted, started: G.started, playId: G.playId, trackingStarted: G.trackingStarted };
   if (G.vegas && S.vegasCumulative) { ST.vegasTotal += prev.score - G.score; saveStats(); }
   G = Object.assign(prev, keep);
+  playTracking?.action('undo', trackingDetails());
   hintIdx = 0; stuckShown = false;
   sfx('place');
   saveGame(); render(); updateHud(); updateBar();
@@ -227,7 +241,7 @@ function undo() {
 function autoMove(id) {
   if (busy || G.won) return;
   const g = grabSet(id);
-  if (!g) { shake([id]); return; }
+  if (!g) { trackAction('blocked'); shake([id]); return; }
   const { loc, ids } = g;
   const lead = ids[0];
   if (ids.length === 1 && loc.type !== 'found') {
@@ -244,6 +258,7 @@ function autoMove(id) {
   for (const t of order) if (G.tab[t].length && canTab(lead, t)) { moveCards(ids, loc, 'tab', t); return; }
   const kingAtBottom = loc.type === 'tab' && loc.idx === 0;
   if (!kingAtBottom) for (const t of order) if (!G.tab[t].length && canTab(lead, t)) { moveCards(ids, loc, 'tab', t); return; }
+  trackAction('blocked');
   shake(ids); sfx('bad');
 }
 
@@ -381,7 +396,7 @@ function analyse(limit = 80000) {
 
 function hint() {
   if (busy || G.won) return;
-  if (G.started) playTracking?.touch();
+  trackAction('hint');
   const moves = usefulMoves();
   if (moves.length) {
     const m = moves[hintIdx % moves.length]; hintIdx++;
@@ -420,6 +435,7 @@ function shake(ids) {
 function noMoves() {
   stuckShown = true;
   G.deadEnd = true; saveGame();
+  endTracking('stuck');
   sfx('bad');
   dialog('Geen zetten meer', `<p>Helaas, dit spel kan niet meer worden uitgespeeld.</p>
     <p>Er kan geen kaart meer naar de stapels boven en er kan geen dichte kaart meer worden omgedraaid, ook niet met de kaarten uit de stapel.</p>`, [
@@ -466,6 +482,7 @@ function autoFinish() {
     G.tab[best.t].pop(); G.found[f].push(best.c);
     if (G.vegas) addScore(5); else addScore(10);
     G.moves++;
+    playTracking?.action('auto_finish', trackingDetails());
     liftCards([best.c]);
     sfx('found');
     render(); updateHud();
@@ -477,11 +494,11 @@ function autoFinish() {
 /* ================= Win ================= */
 function win() {
   if (G.won) return;
-  playTracking?.win();
   G.won = true; busy = false;
   let bonus = 0;
   if (!G.vegas && G.time >= 30) bonus = Math.round(700000 / G.time);
   if (!G.vegas) G.score += bonus;
+  playTracking?.state(trackingDetails()); playTracking?.win();
   const st = ST['d' + G.draw];
   st.won++; st.streak++; st.bestStreak = Math.max(st.bestStreak, st.streak);
   if (!G.vegas) st.bestScore = st.bestScore == null ? G.score : Math.max(st.bestScore, G.score);
@@ -516,10 +533,11 @@ function newGame(confirmFirst, sameSeed) {
     return;
   }
   if (inProgress) { ST['d' + G.draw].streak = 0; saveStats(); }
-  playTracking?.stop();
+  endTracking(sameSeed ? 'restart' : 'new_game');
   stopWinAnimation();
   const seed = sameSeed && G ? G.seed : (Math.random() * 2 ** 31) | 0;
   G = newGameState(seed, S.draw, S.vegas);
+  G.playId = playTracking?.newRound();
   H = []; hintIdx = 0; stuckShown = false;
   saveGame();
   dealAnimation();
@@ -529,7 +547,7 @@ function newGame(confirmFirst, sameSeed) {
 /* ================= Layout & rendering ================= */
 const board = document.getElementById('board');
 board.addEventListener('pointerdown', () => {
-  if (G && G.started && !G.won && $('modal').hidden && $('landing').hidden) playTracking?.touch();
+  if (G && G.started && !G.won && $('modal').hidden && $('landing').hidden) playTracking?.touch(false, trackingDetails());
 });
 const cardEl = [];
 const slotEl = {};
@@ -919,7 +937,7 @@ function endDrag(e) {
   const lx = pos[lead].x + d.dx, ly = pos[lead].y + d.dy;
   const target = dropTarget(lead, d.g, lx, ly, e ? e.clientX : 0, e ? e.clientY : 0);
   if (target) moveCards(d.g.ids, d.g.loc, target.type, target.i);
-  else render();
+  else { trackAction('blocked'); render(); }
 }
 board.addEventListener('pointerup', endDrag);
 board.addEventListener('pointercancel', e => { if (drag) { const d = drag; drag = null; d.g && d.g.ids.forEach(id => cardEl[id].classList.remove('drag')); render(); } });
@@ -1002,6 +1020,7 @@ function updateBar() {
 
 /* ================= Timer ================= */
 setInterval(() => {
+  if (G) playTracking?.state(trackingDetails());
   playTracking?.tick(!!(G && G.started && !G.won && $('landing').hidden && ($('modal').hidden || !dialogPausesClock)));
   if (!G || !G.started || G.won || document.hidden || !$('modal').hidden && dialogPausesClock) return;
   G.time++;
@@ -1019,7 +1038,7 @@ function toast(msg) {
 
 /* ================= Dialogs ================= */
 function dialog(title, html, buttons) {
-  if (dialogPausesClock) playTracking?.stop();
+  if (dialogPausesClock) endTracking('menu');
   const m = $('modal'), sh = m.querySelector('.sheet');
   sh.innerHTML = `${title ? `<h2>${title}</h2>` : ''}<div class="body">${html}</div>${buttons && buttons.length ? '<div class="btns"></div>' : ''}`;
   if (buttons) {
@@ -1290,7 +1309,7 @@ function buildFan() {
   });
 }
 function showLanding(scrollToInstall) {
-  playTracking?.stop();
+  endTracking('menu');
   closeDialog();
   buildFan();
   const ld = $('landing');

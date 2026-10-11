@@ -135,11 +135,9 @@ test('combined totals include both games and filters keep their histories separa
   assert.equal(a.nodes.get('todayGames').textContent, '1 spel');
   assert.equal(a.nodes.get('status').textContent, 'Nu niet actief');
   assert.equal(a.nodes.get('sessions').children.length, 1);
-  assert.equal(a.nodes.get('levelHeader').hidden, true);
   a.nodes.get('game').value = 'sudoku'; a.nodes.get('game').onchange();
   assert.equal(a.nodes.get('status').textContent, 'Speelt nu Sudoku');
-  assert.equal(a.nodes.get('sessions').children[0].children[5].textContent, 'Moeilijk · Dagelijks');
-  assert.equal(a.nodes.get('levelHeader').hidden, false);
+  assert.match(a.nodes.get('sessions').children[0].children[5].textContent, /Moeilijk · Dagelijks/);
   assert.equal(a.streams.length, 2, 'filtering reuses the stream instead of downloading history again');
   assert.equal(a.context.location.search, '?game=sudoku');
 });
@@ -166,11 +164,11 @@ test('unknown apps and malformed Sudoku metadata are ignored', () => {
 });
 
 
-test('switching to all games removes the previous query filter and survives reload', () => {
+test('switching to all games replaces the previous query filter and survives reload', () => {
   const saved = new Map(), id = 'a'.repeat(32);
   const a = dashboard('#' + id, saved, '?game=sudoku');
   a.nodes.get('game').value = 'all'; a.nodes.get('game').onchange();
-  assert.equal(a.context.location.search, '');
+  assert.equal(a.context.location.search, '?game=all');
   assert.equal(a.context.location.pathname, '/Patience-app-opa/dash/');
   a.nodes.get('who').value = 'b'.repeat(32); a.nodes.get('who').onchange();
   const reloaded = dashboard(a.context.location.hash, saved, a.context.location.search);
@@ -178,5 +176,66 @@ test('switching to all games removes the previous query filter and survives relo
   assert.equal(reloaded.nodes.get('who').value, 'b'.repeat(32));
   const other = dashboard('#' + id, new Map(), '?game=sudoku&view=family');
   other.nodes.get('game').value = 'all'; other.nodes.get('game').onchange();
-  assert.equal(other.context.location.search, '?view=family');
+  assert.equal(other.context.location.search, '?game=all&view=family');
+});
+
+
+const detail = (r, values = {}) => ({ v: 1, round: 'c'.repeat(32), reason: 'pause', ended: r.last,
+  progress: 1, initial: 0, total: 52, actions: { hint: 1 }, lastAction: 'hint',
+  actionAt: r.last - 1000, lastProgressAt: r.last, maxGap: 1, ...values });
+
+test('insights deduplicate attempts across pauses, preserve legacy history and bucket Dutch play times', () => {
+  const a = dashboard(), r = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: false };
+  a.streams[0].emit('put', { path: '/', data: {
+    first: { ...r, detail: detail(r) },
+    resumed: { ...r, start: r.start - 60000, seconds: 120, games: 0, wins: 1, detail: detail(r, { reason: 'won', progress: 52, initial: 1, actions: { move: 2 }, lastAction: 'move' }) },
+    legacy: { ...r, seconds: 30, games: 0 }
+  } });
+  assert.equal(a.nodes.get('measuredSessions').textContent, 2);
+  assert.equal(a.nodes.get('observedRounds').textContent, 1);
+  assert.equal(a.nodes.get('observedCompleted').textContent, 1);
+  assert.equal(a.nodes.get('typicalTime').textContent, '1 min');
+  assert.equal(a.nodes.get('hours').children[0].children[2].textContent, '3 min');
+  assert.equal(a.nodes.get('weekdays').children[0].children[2].textContent, '3 min');
+  assert.equal(a.nodes.get('modes').children[0].children[1].textContent, 1);
+  assert.equal(a.nodes.get('sessions').children.length, 3);
+  assert.ok(a.nodes.get('coverage').textContent.includes('2 met uitgebreide'));
+});
+
+test('insight period and game filters do not mix apps or invent reasons for stale live records', () => {
+  const a = dashboard(), r = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: true };
+  const old = { ...r, start: r.start - 20 * 86400000, last: r.last - 20 * 86400000, active: false };
+  a.streams[0].emit('put', { path: '/', data: {
+    patience: { ...r, detail: detail(r, { reason: 'playing' }) },
+    sudoku: { ...old, app: 'sudoku', level: 'hard', daily: false, hints: 0, mistakes: 0, detail: detail(old, { round: 'd'.repeat(32), reason: 'lost', actions: { mistake: 3 }, lastAction: 'mistake' }) }
+  } });
+  assert.equal(a.nodes.get('observedRounds').textContent, 2);
+  a.nodes.get('period').value = '7'; a.nodes.get('period').onchange();
+  assert.equal(a.nodes.get('observedRounds').textContent, 1);
+  a.advance(80000);
+  assert.ok(a.nodes.get('endings').children.some(row => row.children[0].textContent === 'Geen betrouwbare eindmelding'));
+  a.nodes.get('game').value = 'sudoku'; a.nodes.get('game').onchange();
+  assert.equal(a.nodes.get('observedRounds').textContent, 0);
+  assert.equal(a.nodes.get('todayTime').textContent, '0 sec');
+});
+
+test('empty Firebase action maps are optional; invalid detail counts cannot distort insights', () => {
+  const a = dashboard(), r = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: false };
+  a.streams[0].emit('put', { path: '/', data: {
+    noActionsYet: { ...r, detail: detail(r, { actions: undefined }) },
+    invalid: { ...r, detail: detail(r, { actions: { hint: 0.5 } }) },
+    invalidProgress: { ...r, detail: detail(r, { progress: 53 }) }
+  } });
+  assert.equal(a.nodes.get('observedRounds').textContent, 1);
+  assert.equal(a.nodes.get('sessions').children.length, 1);
+  assert.equal(a.nodes.get('actionCounts').children.length, 0);
+});
+
+
+test('an explicit all-games bookmark survives reload when a different game was remembered', () => {
+  const saved = new Map([['opa.dashboard.game', 'sudoku']]);
+  const a = dashboard('#' + 'a'.repeat(32), saved, '?game=all');
+  assert.equal(a.nodes.get('game').value, 'all');
+  const reloaded = dashboard(a.context.location.hash, saved, a.context.location.search);
+  assert.equal(reloaded.nodes.get('game').value, 'all');
 });

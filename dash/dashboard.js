@@ -8,6 +8,11 @@ const dayKey = t => dayFormatter.format(t);
 const dateTime = t => timeFormatter.format(t);
 const duration = s => s < 60 ? `${Math.floor(s)} sec` : s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} u ${Math.floor(s % 3600 / 60)} min`;
 const levels = { easy: 'Makkelijk', medium: 'Gemiddeld', hard: 'Moeilijk', expert: 'Expert', master: 'Meester', extreme: 'Extreem' };
+const endings = { playing: 'Aan het spelen', won: 'Gewonnen / voltooid', lost: 'Foutenlimiet bereikt', stuck: 'Geen zetten meer gemeld', new_game: 'Nieuw spel gekozen', restart: 'Opnieuw begonnen', menu: 'Menu / startscherm geopend', pause: 'Pauze gekozen', hidden: 'App verborgen / scherm uit', closed: 'Pagina verlaten', idle: '2 minuten geen aanraking', suspended: 'Browser onderbroken', midnight: 'Daggrens (geen stop)', recovered: 'Hersteld na onderbreking', unknown: 'Geen betrouwbare eindmelding' };
+const actionNames = { move: 'Kaart verplaatst', draw: 'Stapel getrokken', recycle: 'Stapel omgedraaid', undo: 'Ongedaan', hint: 'Hint', blocked: 'Zet lukte niet', auto_finish: 'Automatisch uitgespeeld', input: 'Getal ingevuld', mistake: 'Fout getal gemeld', note: 'Notitie gewijzigd', erase: 'Gewist', second_chance: 'Tweede kans' };
+const hourFormatter = new Intl.DateTimeFormat('nl-NL', { timeZone: zone, hour: '2-digit', hourCycle: 'h23' });
+const weekdayFormatter = new Intl.DateTimeFormat('nl-NL', { timeZone: zone, weekday: 'short' });
+let periodDays = 30;
 const validGame = game => ['all', 'patience', 'sudoku'].includes(game);
 const params = new URLSearchParams(location.search || '');
 let game = params.get('game');
@@ -17,7 +22,7 @@ $('game').value = game;
 const appOf = record => record.app || 'patience';
 function bookmark() {
   const query = new URLSearchParams(location.search || '');
-  if (game === 'all') query.delete('game'); else query.set('game', game);
+  query.set('game', game);
   const queryString = query.toString();
   history.replaceState(null, '', location.pathname + (queryString ? '?' + queryString : '') + '#' + key);
 }
@@ -56,6 +61,7 @@ function fillPicker() {
   if (!key) choose((list.find(([, p]) => /^opa$/i.test(p.name || '')) || list[0])[0]);
   else { $('who').value = key; $('overview').hidden = false; $('naming').hidden = false; refresh(); }
 }
+$('period').onchange = () => { if ([7, 30, 90].includes(Number($('period').value))) { periodDays = Number($('period').value); render(); } };
 $('who').onchange = () => choose($('who').value);
 $('game').onchange = () => {
   if (!validGame($('game').value)) return;
@@ -83,7 +89,6 @@ $('nameForm').onsubmit = async e => {
 function render() {
   const visible = records.filter(r => game === 'all' || appOf(r) === game);
   const showSudoku = game !== 'patience';
-  ['levelHeader', 'hintsHeader', 'mistakesHeader'].forEach(id => { $(id).hidden = !showSudoku; });
   $('gameSummary').textContent = game === 'sudoku' ? 'Sudoku' : game === 'patience' ? 'Patience' : 'Patience en Sudoku samen';
   const now = Date.now(), today = dayKey(now);
   const weekDays = Array.from({ length: 7 }, (_, i) => new Date(Date.parse(`${today}T12:00:00Z`) - i * 86400000).toISOString().slice(0, 10));
@@ -133,11 +138,114 @@ function render() {
   [...visible].sort((a, b) => b.start - a.start).slice(0, 40).forEach(r => {
     const row = document.createElement('tr');
     const isSudoku = appOf(r) === 'sudoku';
-    const values = [dateTime(r.start), isSudoku ? 'Sudoku' : 'Patience', duration(r.seconds), r.games, r.wins];
-    if (showSudoku) values.push(isSudoku ? levels[r.level] + (r.daily ? ' · Dagelijks' : '') : '—', isSudoku ? r.hints : '—', isSudoku ? r.mistakes : '—');
+    const d = r.detail;
+    const values = [dateTime(r.start), isSudoku ? 'Sudoku' : 'Patience', duration(r.seconds), ending(r, now), d ? `${Math.round(d.initial / Math.max(1, d.total) * 100)} → ${Math.round(d.progress / Math.max(1, d.total) * 100)}%` : 'Niet gemeten'];
     values.forEach(value => { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
-    $('sessions').appendChild(row);
+    const detailCell = document.createElement('td');
+    if (d) {
+      const details = document.createElement('details'), summary = document.createElement('summary');
+      summary.textContent = isSudoku ? `${levels[r.level]}${r.daily ? ' · dagelijks' : ''} · ${r.hints} hints · ${r.mistakes} fouten` : 'Bekijk spelacties'; details.appendChild(summary);
+      const add = text => { const line = document.createElement('p'); line.textContent = text; details.appendChild(line); };
+      add(`Begonnen: ${r.games} · Gewonnen / voltooid: ${r.wins} · Laatste activiteit: ${dateTime(r.last)} · Eindmelding: ${d.ended ? dateTime(d.ended) : 'nog geen eindmelding'}`);
+      add(Object.entries(d.actions || {}).map(([k, n]) => `${actionNames[k]}: ${n}`).join(' · ') || 'Geen spelacties gemeten');
+      add(`Laatste spelactie: ${actionNames[d.lastAction] || 'Niet gemeten'}${d.actionAt ? ' om ' + dateTime(d.actionAt) : ''}. Langste tijd zonder spelactie: ${duration(d.maxGap)} (maximaal 2 min).`);
+      add(`Voortgang sinds ${dateTime(d.lastProgressAt)} niet verder toegenomen. Dit meet ${isSudoku ? 'goed ingevulde vakjes' : 'kaarten op de stapels boven'}, niet alle nuttige zetten.`);
+      add(`Voortgang: ${d.progress} van ${d.total} ${isSudoku ? 'in te vullen vakjes goed' : 'kaarten bovenop'}. Score: ${d.score == null ? '—' : d.score}. Spelklok: ${d.gameSeconds == null ? '—' : duration(d.gameSeconds)}.`);
+      if (isSudoku) add(`Fouten tonen: ${d.autoCheck ? 'aan' : 'uit'} · 3-foutenlimiet: ${d.mistakeLimit ? 'aan' : 'uit'}`);
+      else add(`Tik om te verplaatsen: ${d.tapMove ? 'aan' : 'uit'} · Automatisch uitspelen: ${d.autoFinish ? 'aan' : 'uit'}`);
+      add(`Appversie: ${d.build || 'onbekend'} · Poging: ${d.round.slice(0, 8)} (dezelfde code = verder gespeeld). Eindtijd is de tijd van de eindmelding; achtergrond of onderbreking vertelt niet waarom hij stopte.`);
+      detailCell.appendChild(details);
+    } else detailCell.textContent = `${isSudoku ? levels[r.level] + (r.daily ? ' · Dagelijks' : '') + ' · ' + r.hints + ' hints · ' + r.mistakes + ' fouten · ' : ''}Begonnen: ${r.games} · Voltooid: ${r.wins} · Laatste update: ${dateTime(r.last)}. Oude versie: geen uitgebreide spelacties.`;
+    row.appendChild(detailCell); $('sessions').appendChild(row);
   });
+  renderInsights(visible, now);
+}
+function ending(r, now) {
+  if (!r.detail) return 'Niet gemeten (oude versie)';
+  const reason = r.detail.reason;
+  if (reason === 'playing' && (!r.active || now < r.last || now - r.last >= 75000)) return endings.unknown;
+  return endings[reason] || endings.unknown;
+}
+function validDetail(d, r) {
+  if (!d || d.v !== 1 || !validKey(d.round) || !Object.prototype.hasOwnProperty.call(endings, d.reason)) return false;
+  if (!['progress', 'initial', 'total', 'maxGap', 'actionAt', 'lastProgressAt'].every(k => Number.isInteger(d[k]) && d[k] >= 0)) return false;
+  if (d.total < 1 || d.total > 81 || d.progress > d.total || d.initial > d.total || d.maxGap > 120) return false;
+  if (d.lastProgressAt < r.start || d.lastProgressAt > r.last || d.actionAt !== 0 && (d.actionAt < r.start || d.actionAt > r.last)) return false;
+  if (d.ended !== undefined && (!Number.isInteger(d.ended) || d.ended < r.last)) return false;
+  if (d.reason !== 'playing' && d.ended === undefined || d.lastAction !== 'none' && !Object.prototype.hasOwnProperty.call(actionNames, d.lastAction)) return false;
+  return d.actions === undefined || d.actions && typeof d.actions === 'object' && !Array.isArray(d.actions) && Object.entries(d.actions).every(([k, n]) => Object.prototype.hasOwnProperty.call(actionNames, k) && Number.isInteger(n) && n >= 0 && n <= 10000);
+}
+function bars(id, entries, formatter = duration) {
+  const parent = $(id); parent.replaceChildren();
+  const max = Math.max(1, ...entries.map(([, n]) => n));
+  for (const [label, n] of entries) {
+    const row = document.createElement('div'), name = document.createElement('span'), bar = document.createElement('div'), fill = document.createElement('i'), value = document.createElement('span');
+    row.className = 'bar-row'; name.textContent = label; bar.className = 'bar'; fill.style.width = `${n / max * 100}%`; value.textContent = formatter(n);
+    bar.appendChild(fill); row.append(name, bar, value); parent.appendChild(row);
+  }
+}
+function renderInsights(visible, now) {
+  const cutoff = now - periodDays * 86400000;
+  const selected = visible.filter(r => r.last >= cutoff);
+  const measured = selected.filter(r => r.detail), actual = measured.filter(r => r.detail.reason !== 'midnight');
+  $('coverage').textContent = `${selected.length} ${selected.length === 1 ? 'speelblok' : 'speelblokken'} in ${periodDays} dagen; ${measured.length} met uitgebreide metingen. Een pauze of menu kan een spel in meerdere blokken splitsen. Oudere blokken missen deze extra gegevens.`;
+  const lengths = actual.map(r => r.seconds).sort((a, b) => a - b);
+  const median = lengths.length ? (lengths[Math.floor((lengths.length - 1) / 2)] + lengths[Math.floor(lengths.length / 2)]) / 2 : 0;
+  $('typicalTime').textContent = lengths.length ? duration(median) : 'Nog geen metingen';
+  $('measuredSessions').textContent = actual.length;
+  const rounds = new Map();
+  for (const r of measured) { const group = rounds.get(r.detail.round) || []; group.push(r); rounds.set(r.detail.round, group); }
+  $('observedRounds').textContent = rounds.size;
+  $('observedCompleted').textContent = [...rounds.values()].filter(list => list.some(r => r.wins > 0)).length;
+  const hours = Array(24).fill(0), weekdays = new Map(['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map(d => [d, 0]));
+  for (const r of selected) {
+    const span = Math.max(1, r.last - r.start);
+    // Allocate measured play proportionally; the summary does not contain an event timeline.
+    for (let t = Math.max(r.start, cutoff); t < r.last;) {
+      const end = Math.min(r.last, (Math.floor(t / 3600000) + 1) * 3600000), seconds = r.seconds * (end - t) / span;
+      hours[Number(hourFormatter.format(t)) % 24] += seconds;
+      const weekday = weekdayFormatter.format(t).replace('.', '');
+      if (weekdays.has(weekday)) weekdays.set(weekday, weekdays.get(weekday) + seconds);
+      t = end;
+    }
+  }
+  const peakHour = hours.indexOf(Math.max(...hours)), peakDay = [...weekdays].sort((a, b) => b[1] - a[1])[0];
+  $('preferredTimes').textContent = hours.some(n => n > 0) ? `Meeste gemeten speeltijd: ${String(peakHour).padStart(2, '0')}:00–${String((peakHour + 1) % 24).padStart(2, '0')}:00; weekdag: ${peakDay[0]}. Bekijk de verdeling hieronder; bij gelijke waarden wordt één piek getoond.` : 'Nog geen speeltijd om uren of weekdagen te vergelijken.';
+  bars('hours', hours.map((n, h) => [`${String(h).padStart(2, '0')}:00`, n]));
+  bars('weekdays', [...weekdays]);
+  const counts = new Map();
+  for (const r of actual) { const label = ending(r, now); counts.set(label, (counts.get(label) || 0) + 1); }
+  bars('endings', [...counts].sort((a, b) => b[1] - a[1]), n => `${n}×`);
+  $('endingEmpty').hidden = !!actual.length;
+  const actions = {};
+  for (const r of measured) for (const [k, n] of Object.entries(r.detail.actions)) actions[k] = (actions[k] || 0) + n;
+  bars('actionCounts', Object.entries(actions).map(([k, n]) => [actionNames[k], n]).sort((a, b) => b[1] - a[1]), n => `${n}×`);
+  const groups = new Map();
+  for (const list of rounds.values()) {
+    const r = list[0], mode = r.app === 'sudoku' ? `Sudoku · ${levels[r.level]}${r.daily ? ' · dagelijks' : ''}` : `Patience · ${r.detail.mode?.startsWith('vegas') ? 'Vegas ' : ''}${r.detail.mode?.endsWith('3') ? '3 kaarten' : '1 kaart'}`;
+    const group = groups.get(mode) || { attempts: 0, completed: 0, hints: 0, errors: 0 };
+    group.attempts++; if (list.some(x => x.wins > 0)) group.completed++;
+    group.hints += list.reduce((n, x) => n + (x.detail.actions.hint || 0), 0);
+    group.errors += list.reduce((n, x) => n + (x.detail.actions.mistake || 0) + (x.detail.actions.blocked || 0), 0);
+    groups.set(mode, group);
+  }
+  $('modes').replaceChildren();
+  for (const [mode, g] of groups) {
+    const row = document.createElement('tr');
+    for (const value of [mode, g.attempts, g.completed, g.hints, g.errors]) { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); }
+    $('modes').appendChild(row);
+  }
+  $('signals').replaceChildren();
+  const signal = text => { const p = document.createElement('p'); p.textContent = text; $('signals').appendChild(p); };
+  const lost = actual.filter(r => r.detail.reason === 'lost').length, stuck = actual.filter(r => r.detail.reason === 'stuck').length;
+  if (actions.blocked) signal(`${actions.blocked} kaartacties leverden geen zet op. Dit kan een ongeldige zet of een lastig aanraakdoel zijn. Bekijk de laatste actie en voortgang voordat je de bediening aanpast.`);
+  if (lost) signal(`${lost} ${lost === 1 ? 'speelblok eindigde' : 'speelblokken eindigden'} bij de foutenlimiet. Vergelijk Sudoku-niveaus en de 3-fouteninstelling om te zien waar extra uitleg of een mildere limiet kan helpen.`);
+  if (stuck) signal(`${stuck} ${stuck === 1 ? 'speelblok eindigde' : 'speelblokken eindigden'} met de melding Geen zetten meer. Controleer of de opties Nieuw spel, Opnieuw en Terug duidelijk genoeg zijn.`);
+  const afterHelp = actual.filter(r => !['won', 'midnight', 'playing'].includes(r.detail.reason) && ['hint', 'mistake', 'blocked'].includes(r.detail.lastAction) && r.last - r.detail.actionAt <= 30000).length;
+  if (afterHelp) signal(`${afterHelp} ${afterHelp === 1 ? 'blok eindigde' : 'blokken eindigden'} binnen 30 seconden na een hint, foutmelding of mislukte zet. Dit is een samenloop, geen bewezen reden om te stoppen; open de speldetails om het te bekijken.`);
+  if (actions.hint) signal(`${actions.hint} hints gebruikt in de gemeten blokken. Vergelijk hints per niveau en voortgang om te beoordelen waar de uitleg nuttiger kan.`);
+  if (!measured.length) signal('Nieuwe spelinformatie verschijnt automatisch na het spelen met de bijgewerkte apps. Persoonlijke redenen zoals moe of geen tijd kunnen de apps niet vaststellen.');
+  else signal('Menu, pauze, scherm uit en inactiviteit zijn waargenomen appgebeurtenissen. Ze bewijzen geen frustratie, verveling of andere persoonlijke reden. Open pogingen kunnen later nog worden voltooid; de tabel is geen definitief winstpercentage.');
 }
 function put(target, path, data) {
   const parts = path.split('/').filter(Boolean);
@@ -160,7 +268,7 @@ function apply(target, event, patch) {
 function update(event, patch) {
   try {
     cache = apply(cache, event, patch);
-    records = Object.values(cache).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k])) && r.start >= 1577836800000 && r.last >= r.start && r.last - r.start <= 90000000 && r.seconds >= 0 && r.seconds <= 90000 && r.games >= 0 && r.games <= 1000 && r.wins >= 0 && r.wins <= 1000 && typeof r.active === 'boolean' && (r.app === undefined || r.app === 'sudoku') && (r.app !== 'sudoku' || Object.prototype.hasOwnProperty.call(levels, r.level) && typeof r.daily === 'boolean' && ['hints', 'mistakes'].every(k => Number.isInteger(r[k]) && r[k] >= 0 && r[k] <= 1000)));
+    records = Object.values(cache).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k])) && r.start >= 1577836800000 && r.last >= r.start && r.last - r.start <= 90000000 && r.seconds >= 0 && r.seconds <= 90000 && r.games >= 0 && r.games <= 1000 && r.wins >= 0 && r.wins <= 1000 && typeof r.active === 'boolean' && (r.detail === undefined || validDetail(r.detail, r)) && (r.app === undefined || r.app === 'sudoku') && (r.app !== 'sudoku' || Object.prototype.hasOwnProperty.call(levels, r.level) && typeof r.daily === 'boolean' && ['hints', 'mistakes'].every(k => Number.isInteger(r[k]) && r[k] >= 0 && r[k] <= 1000))).map(r => r.detail ? { ...r, detail: { ...r.detail, actions: r.detail.actions || {} } } : r);
     connected = true; $('notice').textContent = ''; render();
   } catch (_) { $('notice').textContent = 'Een update kon niet worden gelezen.'; }
 }
