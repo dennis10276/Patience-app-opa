@@ -8,18 +8,57 @@ const dayKey = t => dayFormatter.format(t);
 const dateTime = t => timeFormatter.format(t);
 const duration = s => s < 60 ? `${Math.floor(s)} sec` : s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} u ${Math.floor(s % 3600 / 60)} min`;
 let records = [], cache = Object.create(null), stream = null, connected = false;
-const key = location.hash.slice(1);
-const valid = /^[a-f0-9]{32}$/.test(key);
+let players = Object.create(null), directory = null, directoryLoaded = false;
+const validKey = key => /^[a-f0-9]{32}$/.test(key || '');
+let key = validKey(location.hash.slice(1)) ? location.hash.slice(1) : '';
+if (!key) { try { const saved = localStorage.getItem('patience.dashboard.player'); if (validKey(saved)) key = saved; } catch (_) {} }
 const base = String((window.PATIENCE_TRACKING || {}).databaseUrl || '').replace(/\/$/, '');
-$('connect').hidden = valid;
-$('overview').hidden = !valid;
-$('connectForm').onsubmit = e => {
+function choose(next) {
+  if (!validKey(next)) return;
+  if (next !== key) {
+    if (stream) stream.close(); stream = null;
+    cache = Object.create(null); records = []; connected = false;
+  }
+  key = next;
+  history.replaceState(null, '', '#' + key);
+  try { localStorage.setItem('patience.dashboard.player', key); } catch (_) {}
+  $('who').value = key;
+  $('playerName').value = players[key]?.name || '';
+  $('nameStatus').textContent = '';
+  $('overview').hidden = false; $('naming').hidden = false;
+  render(); refresh();
+}
+function fillPicker() {
+  const list = Object.entries(players).filter(([id, p]) => validKey(id) && p && typeof p === 'object');
+  // Preserve old bookmarked links, including devices that have not received the update yet.
+  if (key && !list.some(([id]) => id === key)) list.push([key, {}]);
+  const label = (id, p) => `${typeof p.name === 'string' && p.name.trim() ? p.name.trim().slice(0, 40) : p.device || 'Apparaat'} · ${id.slice(0, 8)}`;
+  list.sort((a, b) => label(...a).localeCompare(label(...b), 'nl'));
+  $('who').replaceChildren();
+  for (const [id, p] of list) { const option = document.createElement('option'); option.value = id; option.textContent = label(id, p); $('who').appendChild(option); }
+  $('who').disabled = !list.length;
+  $('empty').hidden = !!list.length || !directoryLoaded;
+  if (!list.length) { const option = document.createElement('option'); option.textContent = 'Nog geen spelers'; $('who').appendChild(option); $('status').textContent = 'Nog geen spelers'; return; }
+  if (!key) choose((list.find(([, p]) => /^opa$/i.test(p.name || '')) || list[0])[0]);
+  else { $('who').value = key; $('overview').hidden = false; $('naming').hidden = false; refresh(); }
+}
+$('who').onchange = () => choose($('who').value);
+addEventListener('hashchange', () => { const next = location.hash.slice(1); if (validKey(next)) { choose(next); fillPicker(); } });
+$('nameForm').onsubmit = async e => {
   e.preventDefault();
-  const input = $('privateLink').value.trim().split('#').pop();
-  if (!/^[a-f0-9]{32}$/.test(input)) { $('notice').textContent = 'Plak de apparaatcode uit Firebase of een bestaande privélink.'; return; }
-  location.hash = input;
+  const id = key, name = $('playerName').value.trim();
+  if (!validKey(id) || !name || name.length > 40) return;
+  $('saveName').disabled = true; $('nameStatus').textContent = 'Opslaan…';
+  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(`${base}/players/${id}.json`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }), signal: controller.signal });
+    if (!response.ok) throw new Error('denied');
+    if (!players[id]) players[id] = {};
+    players[id].name = name; fillPicker();
+    if (key === id) $('nameStatus').textContent = 'Naam opgeslagen.';
+  } catch (_) { if (key === id) $('nameStatus').textContent = 'Naam niet opgeslagen. Probeer het opnieuw zodra er verbinding is.'; }
+  finally { clearTimeout(timeout); $('saveName').disabled = false; }
 };
-addEventListener('hashchange', () => location.reload());
 function render() {
   const now = Date.now(), today = dayKey(now);
   const weekDays = Array.from({ length: 7 }, (_, i) => new Date(Date.parse(`${today}T12:00:00Z`) - i * 86400000).toISOString().slice(0, 10));
@@ -63,43 +102,71 @@ function render() {
     $('sessions').appendChild(row);
   });
 }
-function put(path, data) {
+function put(target, path, data) {
   const parts = path.split('/').filter(Boolean);
-  if (!parts.length) { cache = Object.assign(Object.create(null), data || {}); return; }
+  if (!parts.length) return Object.assign(Object.create(null), data || {});
   const [id, field] = parts;
-  if (parts.length > 2 || parts.some(p => ['__proto__', 'constructor', 'prototype'].includes(p))) return;
-  if (!field) { if (data === null) delete cache[id]; else cache[id] = data; }
-  else if (cache[id]) { if (data === null) delete cache[id][field]; else cache[id][field] = data; }
+  if (parts.length > 2 || parts.some(p => ['__proto__', 'constructor', 'prototype'].includes(p))) return target;
+  if (!field) { if (data === null) delete target[id]; else target[id] = data; }
+  else {
+    if (!target[id] || typeof target[id] !== 'object') target[id] = Object.create(null);
+    if (data === null) delete target[id][field]; else target[id][field] = data;
+  }
+  return target;
+}
+function apply(target, event, patch) {
+  const message = JSON.parse(event.data);
+  if (patch) Object.entries(message.data || {}).forEach(([field, value]) => { target = put(target, `${message.path}/${field}`, value); });
+  else target = put(target, message.path, message.data);
+  return target;
 }
 function update(event, patch) {
   try {
-    const message = JSON.parse(event.data);
-    if (patch) Object.entries(message.data || {}).forEach(([key, value]) => put(`${message.path}/${key}`, value));
-    else put(message.path, message.data);
-    records = Object.values(cache).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isFinite(r[k])) && r.last >= r.start && r.seconds >= 0);
+    cache = apply(cache, event, patch);
+    records = Object.values(cache).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k])) && r.last >= r.start && r.last - r.start <= 90000000 && r.seconds >= 0 && r.seconds <= 90000 && r.games >= 0 && r.games <= 1000 && r.wins >= 0 && r.wins <= 1000 && typeof r.active === 'boolean');
     connected = true; $('notice').textContent = ''; render();
   } catch (_) { $('notice').textContent = 'Een update kon niet worden gelezen.'; }
 }
 function refresh() {
-  if (!valid || stream || document.hidden || !base) return;
+  if (!validKey(key) || stream || document.hidden || !base) return;
   const query = new URLSearchParams({ orderBy: '"start"', startAt: String(Date.now() - 90 * 86400000) });
   // Load history once, then receive only changes. No repeated history downloads.
-  stream = new EventSource(`${base}/sessions/${key}.json?${query}`);
-  stream.addEventListener('put', event => update(event, false));
-  stream.addEventListener('patch', event => update(event, true));
-  stream.onerror = () => { connected = false; $('notice').textContent = 'Geen verbinding. We proberen het zo weer.'; render(); };
+  const source = stream = new EventSource(`${base}/sessions/${key}.json?${query}`);
+  source.addEventListener('put', event => { if (source === stream) update(event, false); });
+  source.addEventListener('patch', event => { if (source === stream) update(event, true); });
+  source.onerror = () => { if (source !== stream) return; connected = false; $('notice').textContent = 'Geen verbinding. We proberen het zo weer.'; render(); };
   const denied = () => {
-    stream.close(); stream = null; connected = false;
+    if (source !== stream) return;
+    source.close(); stream = null; connected = false;
     $('notice').textContent = 'De database staat dit overzicht nog niet toe. Controleer de Firebase-regels.'; render();
   };
-  stream.addEventListener('cancel', denied);
-  stream.addEventListener('auth_revoked', denied);
+  source.addEventListener('cancel', denied);
+  source.addEventListener('auth_revoked', denied);
+}
+function loadPlayers() {
+  if (directory || document.hidden || !base) return;
+  const source = directory = new EventSource(`${base}/players.json`);
+  for (const kind of ['put', 'patch']) source.addEventListener(kind, event => {
+    if (directory !== source) return;
+    try { players = apply(players, event, kind === 'patch'); directoryLoaded = true; $('notice').textContent = ''; fillPicker(); }
+    catch (_) { $('notice').textContent = 'De spelerslijst kon niet worden gelezen.'; }
+  });
+  source.onerror = () => { if (directory === source) $('notice').textContent = 'Spelerslijst tijdelijk niet bereikbaar. We proberen het zo weer.'; };
+  const denied = () => {
+    if (directory !== source) return;
+    source.close(); directory = null;
+    $('notice').textContent = 'De spelerslijst is nog niet toegankelijk. Controleer de Firebase-regels.';
+    if (!key) $('status').textContent = 'Spelerslijst niet beschikbaar';
+  };
+  source.addEventListener('cancel', denied); source.addEventListener('auth_revoked', denied);
 }
 if (!base) { $('notice').textContent = 'De aparte Firebase-database voor Patience is nog niet ingesteld.'; $('status').textContent = 'Nog niet ingesteld'; }
-else if (!valid) $('status').textContent = 'Privélink nodig';
-else { refresh(); setInterval(render, 10000); }
+else { if (key) { fillPicker(); choose(key); } loadPlayers(); setInterval(() => { if (key) render(); }, 10000); }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { if (stream) stream.close(); stream = null; connected = false; }
-  else refresh();
+  if (document.hidden) {
+    if (stream) stream.close(); stream = null; connected = false;
+    if (directory) directory.close(); directory = null;
+    if (key) render();
+  } else { refresh(); loadPlayers(); }
 });
 })();

@@ -37,17 +37,24 @@ geen code in te voeren en geen link te openen. Elke installatie krijgt automatis
 apparaatcode, die bij volgende bezoeken en updates gelijk blijft. Spellen op je eigen apparaat komen dus
 niet bij die van opa. Alleen de pagina openen zonder te spelen levert geen speelrecord op.
 
-Voor de familie: open in de Firebase-console `sessions` en kopieer de code van opa's apparaat.
-Plak die in `dash/` en bewaar de resulterende link op je eigen telefoon/computer. Het overzicht toont
-recente activiteit, speeltijd vandaag/afgelopen week, begonnen/gewonnen spellen en recente speelmomenten.
-De database als geheel blijft afgesloten: alleen de eigenaar kan via de console de apparaten bekijken.
-Met een apparaatcode kan het dashboard de gegevens van dat apparaat lezen. Iedereen met de link kan
-ook via de database-API de records wijzigen. Deel de link alleen met familie. Bestaande privélinks blijven
-werken. De oude schakelaar voor delen is verwijderd; ook een eerder uitgeschakelde installatie gaat
-na de update automatisch bijhouden.
+Voor de familie: open `dash/` en kies de speler in de lijst, net als bij Mahjong. Apparaten verschijnen
+vanzelf zodra erop wordt gespeeld. Het dashboard onthoudt de keuze en bewaart hem in de URL, zodat
+bestaande links blijven werken. Via **Speler een naam geven** kun je bijvoorbeeld "Opa" invullen;
+deze naam blijft in Firebase bewaard en is ook op andere familieapparaten zichtbaar.
+
+`players` bevat één klein profiel per installatie: alleen apparaattype (iPhone/iPad/Android/Computer)
+en een optionele naam vanuit het dashboard. De lijst is publiek leesbaar om automatisch te kunnen kiezen.
+Daarmee zijn ook de speelgegevens van de genoemde apparaten toegankelijk voor iedereen met dit dashboard
+of database-adres. Er is geen aanmelding of toegangscontrole voor familie; namen en records kunnen via de
+API gewijzigd worden door iemand die de apparaatcode kent. De rest van de databaseroot is niet leesbaar.
+Gebruik geen gevoelige namen. De oude deelknop is verwijderd; alles gaat automatisch.
+
+Als browseropslag niet werkt en er nog geen bewaarde apparaatcode is, slaat het spel tracking over.
+Het spel blijft werken en probeert de code bij een volgende zet opnieuw te bewaren. Een al bewaarde code
+blijft bruikbaar wanneer alleen nieuwe schrijfacties door volle opslag mislukken.
 
 Er wordt één klein record per speelmoment opgeslagen: begintijd, laatste activiteit, seconden, aantal
-begonnen/gewonnen spellen en actief/niet actief. Geen kaarten, zettenlogboek, naam of apparaatdetails.
+begonnen/gewonnen spellen en actief/niet actief. Geen kaarten of zettenlogboek in de sessies. Het kleine spelersprofiel staat apart.
 Hetzelfde record wordt elke 30 seconden bijgewerkt; herhaalde verzending maakt geen dubbele records.
 Speeltijd is een schatting: zichtbaar spel, buiten menu's, tot maximaal twee minuten na het laatste
 kaartcontact. Achtergrondtijd en lange onderbrekingen van de browsertimer tellen niet mee. Een spel wordt
@@ -62,4 +69,6 @@ Bij 20 speelmomenten per dag blijft de ruwe recordinhoud ongeveer 1 MB per jaar,
 en transport. Updates voegen geen nieuwe records toe. Tijden/daggrenzen gebruiken Europe/Amsterdam.
 
 Controle: `node --test tests/*.test.cjs` (offline sync, herhaald verzenden, inactiviteit,
-achtergrondtijd, herstel na afsluiten, automatische migratie, middernacht en live dashboardupdates).
+achtergrondtijd, herstel na afsluiten, opslagfouten, automatische migratie, middernacht, spelerskeuze,
+naamgeving en live dashboardupdates). Controleer de regels ook met de Rules Playground in Firebase:
+hele tellers toestaan, breuken weigeren, spelerslijst lezen toestaan en root lezen weigeren.

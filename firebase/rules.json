@@ -5,17 +5,49 @@
     "sessions": {
       "$key": {
         ".read": "$key.matches(/^[a-f0-9]{32}$/)",
-        ".indexOn": ["start"],
+        ".indexOn": [
+          "start"
+        ],
         "$session": {
           ".write": "$key.matches(/^[a-f0-9]{32}$/) && $session.matches(/^[a-f0-9]{32}$/) && newData.exists()",
           ".validate": "newData.hasChildren(['start', 'last', 'seconds', 'games', 'wins', 'active']) && (!data.exists() || newData.child('start').val() === data.child('start').val())",
-          "start": { ".validate": "newData.isNumber() && newData.val() >= 1577836800000 && newData.val() <= now + 300000" },
-          "last": { ".validate": "newData.isNumber() && newData.val() >= newData.parent().child('start').val() && newData.val() <= now + 300000 && newData.val() <= newData.parent().child('start').val() + 90000000" },
-          "seconds": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 90000" },
-          "games": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000" },
-          "wins": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000" },
-          "active": { ".validate": "newData.isBoolean()" },
-          "$other": { ".validate": false }
+          "start": {
+            ".validate": "newData.isNumber() && newData.val() >= 1577836800000 && newData.val() <= now + 300000 && newData.val() % 1 === 0"
+          },
+          "last": {
+            ".validate": "newData.isNumber() && newData.val() >= newData.parent().child('start').val() && newData.val() <= now + 300000 && newData.val() <= newData.parent().child('start').val() + 90000000 && newData.val() % 1 === 0"
+          },
+          "seconds": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 90000 && newData.val() % 1 === 0"
+          },
+          "games": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000 && newData.val() % 1 === 0"
+          },
+          "wins": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000 && newData.val() % 1 === 0"
+          },
+          "active": {
+            ".validate": "newData.isBoolean()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "players": {
+      ".read": true,
+      "$key": {
+        ".write": "$key.matches(/^[a-f0-9]{32}$/) && newData.exists()",
+        ".validate": "newData.hasChild('device') || newData.hasChild('name')",
+        "device": {
+          ".validate": "newData.isString() && (newData.val() === 'iPad' || newData.val() === 'iPhone' || newData.val() === 'Android' || newData.val() === 'Computer')"
+        },
+        "name": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40"
+        },
+        "$other": {
+          ".validate": false
         }
       }
     }
