@@ -15,8 +15,12 @@ if (!sharing || typeof sharing !== 'object') sharing = {};
 if (!validKey(sharing.key)) sharing.key = randomId();
 sharing = { key: sharing.key };
 write(KEY, sharing);
+// Never upload under an identity that will disappear on the next visit.
+const identityReady = () => read(KEY, {}).key === sharing.key;
+const device = /iPhone|iPod/.test(navigator.userAgent || '') ? 'iPhone' : /iPad/.test(navigator.userAgent || '') || (/Macintosh/.test(navigator.userAgent || '') && navigator.maxTouchPoints > 1) ? 'iPad' : /Android/.test(navigator.userAgent || '') ? 'Android' : 'Computer';
 if (!pending || typeof pending !== 'object' || Array.isArray(pending)) pending = {};
 let current = null, lastTouch = 0, lastTick = 0, lastSent = 0, flushing = false;
+const registered = new Set();
 const base = () => String((window.PATIENCE_TRACKING || {}).databaseUrl || '').replace(/\/$/, '');
 // Never resend a stale 'active' state after a browser crash or offline close.
 for (const [id, entry] of Object.entries(pending)) {
@@ -51,6 +55,10 @@ function stop() {
 }
 function touch(newGame = false) {
   if (document.hidden) return;
+  if (!identityReady()) {
+    write(KEY, sharing);
+    if (!identityReady()) return;
+  }
   const now = Date.now();
   if (current && (now - lastTouch >= IDLE || day(now) !== day(current.data.start))) stop();
   if (!current) {
@@ -81,6 +89,15 @@ async function flush() {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
       try {
+        if (!registered.has(entry.key)) {
+          // PATCH preserves any friendly name given in the family dashboard.
+          const profile = await fetch(`${base()}/players/${entry.key}.json`, {
+            method: 'PATCH', body: JSON.stringify({ device }), headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal, keepalive: true
+          });
+          if (!profile.ok) break;
+          registered.add(entry.key);
+        }
         const response = await fetch(`${base()}/sessions/${entry.key}/${id}.json`, {
           method: 'PUT', body, headers: { 'Content-Type': 'application/json' },
           signal: controller.signal, keepalive: true
