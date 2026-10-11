@@ -26,6 +26,7 @@ function bookmark() {
   const queryString = query.toString();
   history.replaceState(null, '', location.pathname + (queryString ? '?' + queryString : '') + '#' + key);
 }
+const expandedSessions = new Set();
 let records = [], cache = Object.create(null), stream = null, connected = false;
 let players = Object.create(null), directory = null, directoryLoaded = false;
 const validKey = key => /^[a-f0-9]{32}$/.test(key || '');
@@ -144,6 +145,9 @@ function render() {
     const detailCell = document.createElement('td');
     if (d) {
       const details = document.createElement('details'), summary = document.createElement('summary');
+      const expansionKey = key + ':' + r._id;
+      details.open = expandedSessions.has(expansionKey);
+      details.addEventListener('toggle', () => { if (details.open) expandedSessions.add(expansionKey); else expandedSessions.delete(expansionKey); });
       summary.textContent = isSudoku ? `${levels[r.level]}${r.daily ? ' · dagelijks' : ''} · ${r.hints} hints · ${r.mistakes} fouten` : 'Bekijk spelacties'; details.appendChild(summary);
       const add = text => { const line = document.createElement('p'); line.textContent = text; details.appendChild(line); };
       add(`Begonnen: ${r.games} · Gewonnen / voltooid: ${r.wins} · Laatste activiteit: ${dateTime(r.last)} · Eindmelding: ${d.ended ? dateTime(d.ended) : 'nog geen eindmelding'}`);
@@ -268,7 +272,7 @@ function apply(target, event, patch) {
 function update(event, patch) {
   try {
     cache = apply(cache, event, patch);
-    records = Object.values(cache).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k])) && r.start >= 1577836800000 && r.last >= r.start && r.last - r.start <= 90000000 && r.seconds >= 0 && r.seconds <= 90000 && r.games >= 0 && r.games <= 1000 && r.wins >= 0 && r.wins <= 1000 && typeof r.active === 'boolean' && (r.detail === undefined || validDetail(r.detail, r)) && (r.app === undefined || r.app === 'sudoku') && (r.app !== 'sudoku' || Object.prototype.hasOwnProperty.call(levels, r.level) && typeof r.daily === 'boolean' && ['hints', 'mistakes'].every(k => Number.isInteger(r[k]) && r[k] >= 0 && r[k] <= 1000))).map(r => r.detail ? { ...r, detail: { ...r.detail, actions: r.detail.actions || {} } } : r);
+    records = Object.entries(cache).map(([id, r]) => ({ ...r, _id: id })).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k])) && r.start >= 1577836800000 && r.last >= r.start && r.last - r.start <= 90000000 && r.seconds >= 0 && r.seconds <= 90000 && r.games >= 0 && r.games <= 1000 && r.wins >= 0 && r.wins <= 1000 && typeof r.active === 'boolean' && (r.detail === undefined || validDetail(r.detail, r)) && (r.app === undefined || r.app === 'sudoku') && (r.app !== 'sudoku' || Object.prototype.hasOwnProperty.call(levels, r.level) && typeof r.daily === 'boolean' && ['hints', 'mistakes'].every(k => Number.isInteger(r[k]) && r[k] >= 0 && r[k] <= 1000))).map(r => r.detail ? { ...r, detail: { ...r.detail, actions: r.detail.actions || {} } } : r);
     connected = true; $('notice').textContent = ''; render();
   } catch (_) { $('notice').textContent = 'Een update kon niet worden gelezen.'; }
 }
