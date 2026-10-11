@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
@@ -1046,7 +1046,6 @@ function showMenu() {
     ['undo', 'Zet terugnemen', () => { closeDialog(); undo(); }],
     ['stats', 'Statistieken', () => showStats()],
     ['settings', 'Instellingen', () => showSettings()],
-    ['stats', 'Speeltijd delen', () => showSharing()],
     ['help', 'Uitleg', () => showHelp()],
     ['home', 'Op beginscherm zetten', () => showLanding(true)],
   ];
@@ -1061,25 +1060,6 @@ function showMenu() {
 
 function seg(key, options, onChange) {
   return `<div class="seg" data-key="${key}">${options.map(([v, l]) => `<button data-v="${v}" class="${String(S[key]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
-}
-function showSharing() {
-  const enabled = playTracking?.enabled;
-  const url = playTracking?.link() || '';
-  const message = !playTracking?.configured
-    ? '<p>Het speeloverzicht is nog niet ingesteld.</p>'
-    : enabled
-      ? '<p>Je deelt wanneer en hoe lang je speelt. Met deze privélink kan je familie het overzicht bekijken.</p>'
-      : '<p>Wil je met je familie delen wanneer en hoe lang je speelt? Alleen speeltijd en het aantal gespeelde en gewonnen spellen worden bewaard.</p>';
-  const buttons = [{ label: 'Sluiten', action: closeDialog }];
-  if (enabled) buttons.unshift({ label: 'Kopieer privélink', primary: true, action: async () => {
-    try { await navigator.clipboard.writeText(url); toast('Privélink gekopieerd'); }
-    catch (_) { const input = $('sharingLink'); input.focus(); input.select(); }
-  } });
-  if (playTracking?.configured) buttons.unshift(enabled
-    ? { label: 'Stoppen met delen', action: () => { playTracking.disable(); showSharing(); } }
-    : { label: 'Speeltijd delen', primary: true, action: () => { playTracking.enable(); showSharing(); } });
-  const sh = dialog('Speeltijd delen', message + (enabled ? '<p><label>Privélink<br><input id="sharingLink" readonly style="width:100%;font:inherit;padding:10px" aria-label="Privélink"></label></p><p class="note">Bewaar deze link. Iedereen met de link kan het overzicht bekijken. Eerdere speeltijd blijft bewaard als je stopt met delen.</p>' : ''), buttons);
-  if (enabled) { const input = sh.querySelector('#sharingLink'); input.value = url; input.onclick = () => input.select(); }
 }
 function showSettings() {
   const row = (label, control) => `<div class="set-row"><span>${label}</span>${control}</div>`;

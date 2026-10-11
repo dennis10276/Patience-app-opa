@@ -30,17 +30,21 @@ Bij een nieuwe versie: verhoog `CACHE` in `sw.js` (en `?v=` in `index.html`) zod
 
 Patience gebruikt een **eigen** Firebase Realtime Database (`patience-opa`, België), los van Mahjong.
 `tracking-config.js` bevat alleen het database-adres. Publiceer `firebase/rules.json` in de Firebase-console
-voordat je delen gebruikt; de nieuw aangemaakte database staat aanvankelijk op slot.
+bij het inrichten van een nieuwe database; de nieuw aangemaakte database staat aanvankelijk op slot.
 
-Eenmalig op opa's apparaat: **Menu → Speeltijd delen → Speeltijd delen**. Bewaar de privélink die daar
-verschijnt op je eigen telefoon/computer. Het overzicht toont recente activiteit, de laatste speeltijd,
-speeltijd vandaag/afgelopen week, spellen begonnen en gewonnen, en recente speelmomenten. Alleen dit
-apparaat wordt gevolgd; gewone bezoekers en andere installaties delen standaard niets.
+Speelmomenten worden **automatisch** bijgehouden zodra iemand speelt. Opa hoeft niets aan te zetten,
+geen code in te voeren en geen link te openen. Elke installatie krijgt automatisch een eigen willekeurige
+apparaatcode, die bij volgende bezoeken en updates gelijk blijft. Spellen op je eigen apparaat komen dus
+niet bij die van opa. Alleen de pagina openen zonder te spelen levert geen speelrecord op.
 
-De privélink is de toegangssleutel, zonder inloggen. De sleutel wordt willekeurig op het apparaat gemaakt
-en staat niet in de gepubliceerde code. Iedereen met de link kan de gegevens lezen (en via de database-API
-ook wijzigen). De database als geheel is niet leesbaar. Deel de link alleen met familie.
-Stoppen met delen kan in hetzelfde menu; bestaande gegevens en de privélink blijven bewaard.
+Voor de familie: open in de Firebase-console `sessions` en kopieer de code van opa's apparaat.
+Plak die in `dash/` en bewaar de resulterende link op je eigen telefoon/computer. Het overzicht toont
+recente activiteit, speeltijd vandaag/afgelopen week, begonnen/gewonnen spellen en recente speelmomenten.
+De database als geheel blijft afgesloten: alleen de eigenaar kan via de console de apparaten bekijken.
+Met een apparaatcode kan het dashboard de gegevens van dat apparaat lezen. Iedereen met de link kan
+ook via de database-API de records wijzigen. Deel de link alleen met familie. Bestaande privélinks blijven
+werken. De oude schakelaar voor delen is verwijderd; ook een eerder uitgeschakelde installatie gaat
+na de update automatisch bijhouden.
 
 Er wordt één klein record per speelmoment opgeslagen: begintijd, laatste activiteit, seconden, aantal
 begonnen/gewonnen spellen en actief/niet actief. Geen kaarten, zettenlogboek, naam of apparaatdetails.
@@ -58,4 +62,4 @@ Bij 20 speelmomenten per dag blijft de ruwe recordinhoud ongeveer 1 MB per jaar,
 en transport. Updates voegen geen nieuwe records toe. Tijden/daggrenzen gebruiken Europe/Amsterdam.
 
 Controle: `node --test tests/*.test.cjs` (offline sync, herhaald verzenden, inactiviteit,
-achtergrondtijd, herstel na afsluiten, uitschakelen, middernacht en live dashboardupdates).
+achtergrondtijd, herstel na afsluiten, automatische migratie, middernacht en live dashboardupdates).

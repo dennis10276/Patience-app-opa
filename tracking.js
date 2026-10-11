@@ -10,6 +10,11 @@ const randomId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), n 
 const dayFormatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam' });
 const day = t => dayFormatter.format(t);
 let sharing = read(KEY, {}), pending = read(QUEUE, {});
+// Automatic on every installation, including upgrades from the former sharing switch.
+if (!sharing || typeof sharing !== 'object') sharing = {};
+if (!validKey(sharing.key)) sharing.key = randomId();
+sharing = { key: sharing.key };
+write(KEY, sharing);
 if (!pending || typeof pending !== 'object' || Array.isArray(pending)) pending = {};
 let current = null, lastTouch = 0, lastTick = 0, lastSent = 0, flushing = false;
 const base = () => String((window.PATIENCE_TRACKING || {}).databaseUrl || '').replace(/\/$/, '');
@@ -45,7 +50,7 @@ function stop() {
   flush();
 }
 function touch(newGame = false) {
-  if (!sharing.enabled || !validKey(sharing.key) || document.hidden) return;
+  if (document.hidden) return;
   const now = Date.now();
   if (current && (now - lastTouch >= IDLE || day(now) !== day(current.data.start))) stop();
   if (!current) {
@@ -88,17 +93,10 @@ async function flush() {
   } catch (_) { /* Offline/denied: retain summaries and retry later. */ }
   finally { flushing = false; }
 }
-function enable() {
-  if (!validKey(sharing.key)) sharing.key = randomId();
-  sharing.enabled = true; write(KEY, sharing);
-}
-function disable() { stop(); sharing.enabled = false; write(KEY, sharing); }
-function link() { return validKey(sharing.key) ? new URL(`dash/#${sharing.key}`, location.href).href : ''; }
 window.PatienceTracking = {
-  touch, tick, stop, flush, enable, disable, link,
+  touch, tick, stop, flush,
   win() { if (current) { current.data.wins++; stop(); } },
-  get enabled() { return !!sharing.enabled; },
-  get configured() { return !!base(); }
+  get deviceId() { return sharing.key; }
 };
 document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else flush(); });
 addEventListener('pagehide', stop);
