@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
@@ -1038,7 +1038,13 @@ function showMenu() {
     ['help', 'Uitleg', () => showHelp()],
     ['home', 'Op beginscherm zetten', () => showLanding(true)],
   ];
-  const sh = dialog('Menu', '<div class="menu-list"></div>', [{ label: 'Sluiten', action: closeDialog }]);
+  const sh = dialog('Menu', `<div class="menu-draw"><span>Kaarten trekken</span>${seg('draw', [[1, '1 kaart'], [3, '3 kaarten']])}</div><div class="menu-list"></div>`, [{ label: 'Sluiten', action: closeDialog }]);
+  sh.querySelector('.menu-draw .seg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    S.draw = +b.dataset.v; saveSettings();
+    sh.querySelectorAll('.menu-draw .seg button').forEach(x => x.classList.toggle('on', x === b));
+    setTimeout(() => { closeDialog(); applyModeChange(); }, 180);
+  });
   const list = sh.querySelector('.menu-list');
   items.forEach(([ic, label, fn]) => {
     const b = document.createElement('button'); b.innerHTML = ICONS[ic] + label;
@@ -1095,6 +1101,9 @@ function showSettings() {
 }
 function closeSettings() {
   closeDialog();
+  applyModeChange();
+}
+function applyModeChange() {
   if (G && (G.draw !== S.draw || G.vegas !== S.vegas)) {
     if (!G.counted) newGame(false, true);   // nothing played yet: apply right away to same deal
     else dialog('Nieuw spel?', `<p>De nieuwe instelling (${S.draw === 1 ? '1 kaart' : '3 kaarten'}, ${S.vegas ? 'Vegas' : 'Standaard'}) geldt vanaf het volgende spel.</p><p>Wil je nu een nieuw spel beginnen?</p>`, [
@@ -1151,7 +1160,7 @@ function showHelp() {
   <p><b>Doel:</b> leg alle kaarten op de vier stapels rechtsboven (of linksboven), per kleur van Aas tot Heer/Koning.</p>
   <p><b>De zeven rijen:</b> leg kaarten aflopend en om en om rood en zwart. Bijvoorbeeld een rode 9 op een zwarte 10. Je mag ook een hele reeks tegelijk verplaatsen.</p>
   <p><b>Lege rij:</b> daar mag alleen een Heer (Koning) of een reeks die met een Heer begint.</p>
-  <p><b>De stapel:</b> tik op de dichte stapel om ${S.draw === 1 ? 'een kaart' : 'drie kaarten'} om te draaien. Is de stapel op, tik dan op de lege plek om opnieuw te beginnen.</p>
+  <p><b>De stapel:</b> tik op de dichte stapel om ${S.draw === 1 ? 'een kaart' : 'drie kaarten'} om te draaien. Kiezen tussen 1 of 3 kaarten doe je bovenaan in het <b>Menu</b>. Is de stapel op, tik dan op de lege plek om opnieuw te beginnen.</p>
   <p><b>Verplaatsen:</b> tik op een kaart en hij gaat vanzelf naar de beste plek. Je kunt een kaart ook met je vinger slepen.</p>
   <p><b>Hint:</b> laat een mogelijke zet zien. Tik nog eens voor de volgende.</p>
   <p><b>Terug:</b> neemt de laatste zet terug, zo vaak als je wilt.</p>
