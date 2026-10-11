@@ -16,7 +16,7 @@ $('overview').hidden = !valid;
 $('connectForm').onsubmit = e => {
   e.preventDefault();
   const input = $('privateLink').value.trim().split('#').pop();
-  if (!/^[a-f0-9]{32}$/.test(input)) { $('notice').textContent = 'Plak de volledige privélink uit het spel.'; return; }
+  if (!/^[a-f0-9]{32}$/.test(input)) { $('notice').textContent = 'Plak de apparaatcode uit Firebase of een bestaande privélink.'; return; }
   location.hash = input;
 };
 addEventListener('hashchange', () => location.reload());
@@ -45,7 +45,7 @@ function render() {
   const live = connected && records.some(r => r.active && now >= r.last && now - r.last < 75000);
   $('status').textContent = !connected ? 'Geen verbinding' : live ? 'Nu aan het spelen' : 'Nu niet actief';
   $('status').classList.toggle('live', live);
-  $('lastPlayed').textContent = latest ? `${dateTime(latest.last)} · ${duration(latest.seconds)}` : 'Nog geen speelgegevens. De eerste gegevens verschijnen zodra opa speelt met delen ingeschakeld.';
+  $('lastPlayed').textContent = latest ? `${dateTime(latest.last)} · ${duration(latest.seconds)}` : 'Nog geen speelgegevens. Nieuwe speelmomenten verschijnen automatisch zodra opa speelt.';
   const max = Math.max(60, ...[...totals.values()].map(d => d.seconds));
   $('days').replaceChildren();
   [...weekDays].reverse().forEach(d => {
