@@ -46,6 +46,110 @@
           },
           "mistakes": {
             ".validate": "newData.parent().child('app').val() === 'sudoku' && newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 1000"
+          },
+          "detail": {
+            ".validate": "newData.hasChildren(['v', 'round', 'reason', 'progress', 'initial', 'total', 'lastAction', 'actionAt', 'lastProgressAt', 'maxGap']) && (!data.exists() || newData.child('round').val() === data.child('round').val()) && (newData.child('reason').val() === 'playing' || newData.hasChild('ended'))",
+            "v": {
+              ".validate": "newData.val() === 1"
+            },
+            "round": {
+              ".validate": "newData.isString() && newData.val().matches(/^[a-f0-9]{32}$/)"
+            },
+            "reason": {
+              ".validate": "newData.isString() && (newData.val() === 'playing' || newData.val() === 'unknown' || newData.val() === 'won' || newData.val() === 'lost' || newData.val() === 'stuck' || newData.val() === 'new_game' || newData.val() === 'restart' || newData.val() === 'menu' || newData.val() === 'pause' || newData.val() === 'hidden' || newData.val() === 'closed' || newData.val() === 'idle' || newData.val() === 'suspended' || newData.val() === 'midnight' || newData.val() === 'recovered')"
+            },
+            "total": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 1 && newData.val() <= 81"
+            },
+            "progress": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 81 && newData.val() <= newData.parent().child('total').val()"
+            },
+            "initial": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 81 && newData.val() <= newData.parent().child('total').val()"
+            },
+            "maxGap": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 120"
+            },
+            "score": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= -100000 && newData.val() <= 1000000"
+            },
+            "gameSeconds": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 9000000"
+            },
+            "actions": {
+              "$other": {
+                ".validate": false
+              },
+              "move": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "draw": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "recycle": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "undo": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "hint": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "blocked": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "auto_finish": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "input": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "mistake": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "note": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "erase": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              },
+              "second_chance": {
+                ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= 0 && newData.val() <= 10000"
+              }
+            },
+            "lastAction": {
+              ".validate": "newData.isString() && (newData.val() === 'none' || newData.val() === 'move' || newData.val() === 'draw' || newData.val() === 'recycle' || newData.val() === 'undo' || newData.val() === 'hint' || newData.val() === 'blocked' || newData.val() === 'auto_finish' || newData.val() === 'input' || newData.val() === 'mistake' || newData.val() === 'note' || newData.val() === 'erase' || newData.val() === 'second_chance')"
+            },
+            "$other": {
+              ".validate": false
+            },
+            "build": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 24"
+            },
+            "mode": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 24"
+            },
+            "autoCheck": {
+              ".validate": "newData.isBoolean()"
+            },
+            "mistakeLimit": {
+              ".validate": "newData.isBoolean()"
+            },
+            "tapMove": {
+              ".validate": "newData.isBoolean()"
+            },
+            "autoFinish": {
+              ".validate": "newData.isBoolean()"
+            },
+            "actionAt": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && (newData.val() === 0 || (newData.val() >= newData.parent().parent().child('start').val() && newData.val() <= newData.parent().parent().child('last').val()))"
+            },
+            "lastProgressAt": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= newData.parent().parent().child('start').val() && newData.val() <= newData.parent().parent().child('last').val()"
+            },
+            "ended": {
+              ".validate": "newData.isNumber() && newData.val() % 1 === 0 && newData.val() >= newData.parent().parent().child('last').val() && newData.val() <= now + 300000"
+            }
           }
         }
       }
