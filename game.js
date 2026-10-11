@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.10.0';
+const VERSION = '1.14.0';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
@@ -310,13 +310,14 @@ function usefulMoves() {
    the foundation or a face-down card gets turned over. If no reachable position allows progress,
    the game can never be won and we say so. If the search is too large to finish, we never claim
    "stuck" (unknown = not stuck). */
-function analyse(limit = 80000) {
+function analyse(limit = 80000, opts = {}) {
   const draw = G.draw, maxP = maxPasses(), vegas = G.vegas;
   const fc0 = [0, 0, 0, 0];
   G.found.forEach(p => p.forEach(c => fc0[suitOf(c)]++));
   const down = G.tab.map(p => p.filter(c => !G.up[c]).length);
   const root = { tab: G.tab.map(p => p.filter(c => G.up[c])), stock: G.stock.slice(), waste: G.waste.slice(), fc: fc0, passes: G.passes, first: null };
   const key = st => st.tab.map(p => p.join(',')).join('|') + '/' + st.stock.join(',') + '/' + st.waste.join(',') + '/' + st.fc.join(',') + '/' + (vegas ? st.passes : 0);
+  if (opts.keyOnly) return key(root);
   const fits = (st, c, t) => {
     const p = st.tab[t];
     if (!p.length) return down[t] === 0 && rankOf(c) === 13;
@@ -327,18 +328,27 @@ function analyse(limit = 80000) {
   const clone = st => ({ tab: st.tab.map(p => p.slice()), stock: st.stock.slice(), waste: st.waste.slice(), fc: st.fc.slice(), passes: st.passes, first: st.first });
   const seen = new Set([key(root)]);
   const queue = [root];
+  const fcRoot = fc0[0] + fc0[1] + fc0[2] + fc0[3];
+  const fcSum = st => st.fc[0] + st.fc[1] + st.fc[2] + st.fc[3];
   let qi = 0, rootFirst = null;
   while (qi < queue.length) {
     if (seen.size > limit) return { stuck: false, unknown: true, first: rootFirst };
     const st = queue[qi++];
     const tag = mv => st.first || mv;
-    // progress moves
+    // progress moves: a card up (only counts if it means MORE cards up than now), or a closed card turned
+    const upCounts = fcSum(st) + 1 > fcRoot;
+    // at the start: a card up that just recreates a position from a moment ago is no progress (no circles)
+    const backHere = (c, from) => {
+      if (st !== root || !opts.avoid) return false;
+      const ns = clone(st); if (from < 0) ns.waste.pop(); else ns.tab[from].pop(); ns.fc[suitOf(c)]++;
+      return opts.avoid.has(key(ns));
+    };
     for (let t = 0; t < 7; t++) {
       const p = st.tab[t];
-      if (p.length && goesUp(st, p[p.length - 1])) return { stuck: false, first: tag({ type: 'move', ids: [p[p.length - 1]], toType: 'found' }) };
+      if (upCounts && p.length && goesUp(st, p[p.length - 1]) && !backHere(p[p.length - 1], t)) return { stuck: false, first: tag({ type: 'move', ids: [p[p.length - 1]], toType: 'found' }) };
     }
     const w = st.waste.length ? st.waste[st.waste.length - 1] : -1;
-    if (w >= 0 && goesUp(st, w)) return { stuck: false, first: tag({ type: 'move', ids: [w], toType: 'found' }) };
+    if (upCounts && w >= 0 && goesUp(st, w) && !backHere(w, -1)) return { stuck: false, first: tag({ type: 'move', ids: [w], toType: 'found' }) };
     for (let s = 0; s < 7; s++) {
       const p = st.tab[s];
       if (p.length && down[s] > 0) {
@@ -346,6 +356,7 @@ function analyse(limit = 80000) {
       }
     }
     const push = (ns, mv) => {
+      if (st === root && opts.avoid && opts.avoid.has(key(ns))) return; // never send him back to where he just was
       if (!ns.first) ns.first = mv;
       if (!rootFirst) rootFirst = mv;
       const k = key(ns);
@@ -369,6 +380,11 @@ function analyse(limit = 80000) {
     if (w >= 0) for (let t = 0; t < 7; t++) if (fits(st, w, t)) {
       const ns = clone(st); ns.tab[t].push(ns.waste.pop());
       push(ns, { type: 'move', ids: [w], toType: 'tab', toIdx: t });
+    }
+    if (!upCounts) {
+      for (let t = 0; t < 7; t++) { const p = st.tab[t]; const c = p[p.length - 1];
+        if (p.length && goesUp(st, c)) { const ns = clone(st); ns.tab[t].pop(); ns.fc[suitOf(c)]++; push(ns, { type: 'move', ids: [c], toType: 'found' }); } }
+      if (w >= 0 && goesUp(st, w)) { const ns = clone(st); ns.waste.pop(); ns.fc[suitOf(w)]++; push(ns, { type: 'move', ids: [w], toType: 'found' }); }
     }
     // foundation back to tableau
     for (let k = 0; k < 4; k++) if (st.fc[k] > 0) {
@@ -394,28 +410,286 @@ function analyse(limit = 80000) {
   return { stuck: true, first: null };
 }
 
-function hint() {
-  if (busy || G.won) return;
-  trackAction('hint');
-  const moves = usefulMoves();
-  if (moves.length) {
-    const m = moves[hintIdx % moves.length]; hintIdx++;
-    showHintMove(m.ids, m.toType, m.toIdx);
-    return;
+const clockMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+/* ================= Solver (smart hint) =================
+   The game knows every card, including the face-down ones and the order of the stock.
+   We search (depth-first, with sensible move ordering and pruning) for a sequence of moves that
+   wins the game, within a small time budget. The hint shows the first move of that winning line.
+   Each found move is a list of real actions so it can be replayed exactly. */
+function solve(budgetMs = 900, mode = 'dfs') {
+  const draw = G.draw, maxP = maxPasses(), vegas = G.vegas;
+  const fc0 = [0, 0, 0, 0];
+  G.found.forEach(p => p.forEach(c => fc0[suitOf(c)]++));
+  const root = {
+    tab: G.tab.map(p => p.slice()),
+    down: G.tab.map(p => p.filter(c => !G.up[c]).length),
+    stock: G.stock.slice(), waste: G.waste.slice(), fc: fc0, passes: G.passes
+  };
+  const key = st => st.tab.map((p, i) => st.down[i] + ':' + p.join(',')).join('|') + '/' + st.stock.join(',') + '/' + st.waste.join(',') + '/' + st.fc.join(',') + (vegas ? '/' + st.passes : '');
+  if (mode === 'key') return key(root);
+  const clone = st => ({ tab: st.tab.map(p => p.slice()), down: st.down.slice(), stock: st.stock.slice(), waste: st.waste.slice(), fc: st.fc.slice(), passes: st.passes });
+  const fits = (st, c, t) => {
+    const p = st.tab[t];
+    if (!p.length) return rankOf(c) === 13;
+    const tc = p[p.length - 1];
+    return isRed(tc) !== isRed(c) && rankOf(tc) === rankOf(c) + 1;
+  };
+  const goesUp = (st, c) => rankOf(c) === st.fc[suitOf(c)] + 1;
+  const safeUp = (st, c) => {
+    if (!goesUp(st, c)) return false;
+    const r = rankOf(c); if (r <= 2) return true;
+    const opp = isRed(c) ? [0, 3] : [1, 2];
+    return st.fc[opp[0]] >= r - 1 && st.fc[opp[1]] >= r - 1;
+  };
+  const flipTop = (st, s) => { if (st.tab[s].length && st.down[s] >= st.tab[s].length) st.down[s] = st.tab[s].length - 1; };
+  // apply a move; returns [newState, actions]; then plays safe foundation moves automatically
+  const apply = (st, mv) => {
+    const ns = clone(st); const acts = [];
+    for (const d of (mv.pre || [])) { doMove(ns, d); acts.push(d); }
+    doMove(ns, mv); acts.push(mv);
+    let again = true;
+    while (again) {
+      again = false;
+      for (let s = 0; s < 7; s++) {
+        const p = ns.tab[s]; const c = p[p.length - 1];
+        if (c !== undefined && safeUp(ns, c)) { const m = { t: 'tf', s, ids: [c] }; doMove(ns, m); acts.push(m); again = true; }
+      }
+      const w = ns.waste[ns.waste.length - 1];
+      if (w !== undefined && safeUp(ns, w)) { const m = { t: 'wf', ids: [w] }; doMove(ns, m); acts.push(m); again = true; }
+    }
+    return [ns, acts];
+  };
+  const doMove = (st, m) => {
+    switch (m.t) {
+      case 'tf': st.tab[m.s].pop(); st.fc[suitOf(m.ids[0])]++; flipTop(st, m.s); break;
+      case 'wf': st.waste.pop(); st.fc[suitOf(m.ids[0])]++; break;
+      case 'tt': st.tab[m.d].push(...st.tab[m.s].splice(m.i)); flipTop(st, m.s); break;
+      case 'wt': st.tab[m.d].push(st.waste.pop()); break;
+      case 'ft': st.fc[suitOf(m.ids[0])]--; st.tab[m.d].push(m.ids[0]); break;
+      case 'draw': {
+        if (st.stock.length) { const n = Math.min(draw, st.stock.length); for (let k = 0; k < n; k++) st.waste.push(st.stock.pop()); }
+        else { while (st.waste.length) st.stock.push(st.waste.pop()); st.passes++; }
+      }
+    }
+  };
+  const won = st => st.fc[0] + st.fc[1] + st.fc[2] + st.fc[3] === 52;
+  // the position before each action of a found line, so the hint can keep following the same plan
+  const keysFor = path => { const ks = []; const st = clone(root); for (const a of path) { ks.push(key(st)); doMove(st, a); } return ks; };
+  // every card that can be brought to the top of the waste by drawing (with the number of draws needed)
+  const reachable = st => {
+    const out = []; const seenTop = new Set();
+    let stock = st.stock.slice(), waste = st.waste.slice(), passes = st.passes, k = 0, recycles = 0;
+    const total = stock.length + waste.length;
+    if (!total) return out;
+    if (waste.length) { out.push({ c: waste[waste.length - 1], k: 0 }); seenTop.add(waste[waste.length - 1]); }
+    for (let step = 0; step < total * 2 + 4; step++) {
+      if (stock.length) {
+        const n = Math.min(draw, stock.length);
+        for (let i = 0; i < n; i++) waste.push(stock.pop());
+      } else {
+        if (passes >= maxP || recycles >= 2) break;
+        while (waste.length) stock.push(waste.pop());
+        passes++; recycles++;
+      }
+      k++;
+      const t = waste[waste.length - 1];
+      if (t !== undefined && !seenTop.has(t)) { seenTop.add(t); out.push({ c: t, k }); }
+    }
+    return out;
+  };
+  const moves = st => {
+    const A = [], B = [], C = [], E = [], F = [];
+    for (let s = 0; s < 7; s++) {
+      const p = st.tab[s]; if (!p.length) continue;
+      const c = p[p.length - 1];
+      if (goesUp(st, c)) A.push({ t: 'tf', s, ids: [c] });
+    }
+    // stock/waste cards (drawing first if needed)
+    for (const { c, k } of reachable(st)) {
+      const pre = Array.from({ length: k }, () => ({ t: 'draw', ids: [] }));
+      if (goesUp(st, c)) A.push({ t: 'wf', ids: [c], pre });
+      for (let d = 0; d < 7; d++) if (fits(st, c, d)) C.push({ t: 'wt', d, ids: [c], pre, k });
+    }
+    const revealMoves = [];
+    for (let s = 0; s < 7; s++) {
+      const p = st.tab[s]; const first = st.down[s];
+      for (let i = first; i < p.length; i++) {
+        const lead = p[i];
+        let kind;
+        if (i === first && first > 0) kind = 'reveal';
+        else if (i === 0) kind = 'empty';
+        else if (goesUp(st, p[i - 1])) kind = 'free';
+        else continue;                                   // pointless shuffle
+        for (let d = 0; d < 7; d++) {
+          if (d === s || !fits(st, lead, d)) continue;
+          if (i === 0 && !st.tab[d].length) continue;    // king hopping between empty columns
+          const m = { t: 'tt', s, i, d, ids: p.slice(i), down: first };
+          (kind === 'reveal' ? revealMoves : kind === 'free' ? E : F).push(m);
+        }
+      }
+    }
+    revealMoves.sort((a, b) => b.down - a.down);         // uncover the biggest hidden pile first
+    B.push(...revealMoves);
+    C.sort((a, b) => a.k - b.k);
+    // foundation card back down, only if something can then be placed on it
+    const w = st.waste[st.waste.length - 1];
+    for (let k = 0; k < 4; k++) if (st.fc[k] > 1) {
+      const c = k * 13 + st.fc[k] - 1;
+      const helps = cand => cand !== undefined && isRed(cand) !== isRed(c) && rankOf(cand) === rankOf(c) - 1;
+      let useful = helps(w);
+      for (let s = 0; s < 7 && !useful; s++) for (let i = st.down[s]; i < st.tab[s].length; i++) if (helps(st.tab[s][i])) { useful = true; break; }
+      if (useful) for (let d = 0; d < 7; d++) if (st.tab[d].length && fits(st, c, d)) F.push({ t: 'ft', d, ids: [c] });
+    }
+    return A.concat(B, C, E, F);
+  };
+  const t0 = clockMs();
+  if (mode === 'best') {
+    // best-first: always expand the most promising position (cards up, cards uncovered)
+    const score = st => 12 * (st.fc[0] + st.fc[1] + st.fc[2] + st.fc[3]) - 9 * st.down.reduce((x, y) => x + y, 0) - 0.5 * (st.stock.length + st.waste.length) + 2 * st.tab.filter(p => !p.length).length;
+    const heap = []; const push = n => { heap.push(n); let i = heap.length - 1; while (i > 0) { const pI = (i - 1) >> 1; if (heap[pI].f >= heap[i].f) break; [heap[pI], heap[i]] = [heap[i], heap[pI]]; i = pI; } };
+    const pop = () => { const top = heap[0]; const last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l].f > heap[m].f) m = l; if (r < heap.length && heap[r].f > heap[m].f) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+    const seenB = new Set([key(root)]);
+    push({ st: root, acts: null, parent: null, f: score(root), g: 0 });
+    let n = 0;
+    while (heap.length) {
+      if (((++n & 127) === 0 && clockMs() - t0 > budgetMs) || n > budgetMs * 400) return { path: null, timedOut: true, nodes: n, ms: Math.round(clockMs() - t0) };
+      const node = pop();
+      if (won(node.st)) { const path = []; for (let x = node; x && x.acts; x = x.parent) path.unshift(...x.acts); return { path, keys: keysFor(path), timedOut: false, nodes: n, ms: Math.round(clockMs() - t0) }; }
+      for (const m of moves(node.st)) {
+        const [ns, acts] = apply(node.st, m);
+        const k = key(ns); if (seenB.has(k)) continue; seenB.add(k);
+        push({ st: ns, acts, parent: node, f: score(ns) - 0.02 * (node.g + 1), g: node.g + 1 });
+      }
+    }
+    return { path: null, timedOut: false, nodes: n, ms: Math.round(clockMs() - t0) };
   }
-  const a = analyse();
-  if (a.stuck) { noMoves(); return; }
-  const m = a.first;
-  if (m && m.type === 'move') {
-    let toIdx = m.toIdx;
-    if (m.toType === 'found') toIdx = foundTarget(m.ids[0]);
-    showHintMove(m.ids, m.toType, toIdx);
-    return;
-  }
-  flash([G.stock.length ? cardEl[top(G.stock)] : slotEl.stock]);
-  toast(G.stock.length ? 'Tik op de stapel om een kaart te pakken' : 'Tik op de lege plek om de stapel om te draaien');
-  sfx('hint');
+  const seen = new Set();
+  let nodes = 0, timedOut = false;
+  const dfs = (st, depth) => {
+    if (won(st)) return [];
+    if (((++nodes & 255) === 0 && clockMs() - t0 > budgetMs) || nodes > budgetMs * 400) { timedOut = true; return null; }
+    if (depth > 500) return null;
+    const k = key(st); if (seen.has(k)) return null; seen.add(k);
+    for (const m of moves(st)) {
+      const [ns, acts] = apply(st, m);
+      const r = dfs(ns, depth + 1);
+      if (r) return acts.concat(r);
+      if (timedOut) return null;
+    }
+    return null;
+  };
+  const path = dfs(root, 0);
+  return { path, keys: path ? keysFor(path) : null, timedOut, nodes, ms: Math.round(clockMs() - t0) };
 }
+
+/* turn a solver action into the on-screen hint */
+function showSolverMove(m) {
+  if (m.t === 'draw') {
+    flash([G.stock.length ? cardEl[top(G.stock)] : slotEl.stock]);
+    toast(G.stock.length ? 'Tik op de stapel om een kaart te pakken' : 'Tik op de lege plek om de stapel om te draaien');
+    sfx('hint');
+    return;
+  }
+  if (m.t === 'tf' || m.t === 'wf') return showHintMove(m.ids, 'found', foundTarget(m.ids[0]));
+  return showHintMove(m.ids, 'tab', m.d);
+}
+
+let hintBusy = false;
+function hint() {
+  if (busy || G.won || hintBusy) return;
+  trackAction('hint');
+  hintBusy = true;
+  toast('Even nadenken…');
+  setTimeout(() => { try { smartHint(); } finally { hintBusy = false; } }, 40);
+}
+let plan = null;   // the winning line we are currently hinting: { seed, path, keys }
+/* next move of a winning line from the current position.
+   { act } = next move of a winning line, { lost:true } = searched everything, no win from here,
+   { unknown:true } = search ran out of time */
+function planNextAction() {
+  // keep following the plan we already showed, so hints never go in circles
+  const here = solve(0, 'key');
+  if (plan && plan.seed === G.seed) {
+    const i = plan.keys.indexOf(here);
+    if (i >= 0) return { act: plan.path[i] };
+  }
+  let sol = solve(500, 'dfs');
+  if (!sol.path && sol.timedOut) sol = solve(900, 'best');
+  if (sol.path && sol.path.length) { plan = { seed: G.seed, path: sol.path, keys: sol.keys }; return { act: sol.path[0] }; }
+  return sol.timedOut ? { unknown: true } : { lost: true };
+}
+/* positions he was in during the last few moves (to never hint a move straight back) */
+function recentPositions(n = 12) {
+  const keep = G, out = new Set();
+  try {
+    out.add(analyse(0, { keyOnly: true }));
+    for (let j = H.length - 1; j >= 0 && j >= H.length - n; j--) { G = JSON.parse(H[j]); out.add(analyse(0, { keyOnly: true })); }
+  } catch (e) { /* ignore */ } finally { G = keep; }
+  return out;
+}
+function smartHint() {
+  // 1) the next move of a winning line (knows all cards, so it never leads into a dead end)
+  const r = planNextAction();
+  if (r.act) { hideToast(); showSolverMove(r.act); return; }
+  if (r.lost) {
+    // 2) no winning line from here: find the last position (going back) from which it can still be won
+    const back = findWinnableBack();
+    hideToast();
+    sfx('hint');
+    const n = back ? back.steps : 0;
+    const btns = [];
+    if (back) btns.push({ label: `${n} ${n === 1 ? 'zet' : 'zetten'} terug`, primary: true, action: () => {
+      closeDialog();
+      for (let k = 0; k < n; k++) undo();
+      plan = { seed: G.seed, path: back.sol.path, keys: back.sol.keys };
+      setTimeout(() => showSolverMove(back.sol.path[0]), speedMs() + 150);
+    } });
+    btns.push({ label: 'Dit spel opnieuw', primary: !back, action: () => { closeDialog(); newGame(false, true); } });
+    btns.push({ label: 'Nieuw spel', action: () => { closeDialog(); newGame(false); } });
+    btns.push({ label: 'Sluiten', action: closeDialog });
+    dialog('Zo lukt het niet meer', `<p>Ik zie vanaf hier geen manier meer om dit spel te winnen.</p>` + (back
+      ? `<p>Als je <b>${n} ${n === 1 ? 'zet' : 'zetten'}</b> terug gaat, kan het nog wel. De hint helpt je daarna verder.</p>`
+      : `<p>Je kunt dit spel opnieuw beginnen (dezelfde kaarten) of een nieuw spel kiezen.</p>`), btns);
+    return;
+  }
+  // 3) search ran out of time: shortest way to real progress, but never straight back to a recent position
+  hideToast();
+  const a = analyse(80000, { avoid: recentPositions() });
+  if (a.stuck) { if (analyse().stuck) { noMoves(); return; } toast('Ik zie geen nieuwe goede zet. Probeer Terug, of tik op de stapel.'); return; }
+  const m = a.first;
+  if (m && m.type === 'move') { showHintMove(m.ids, m.toType, m.toType === 'found' ? foundTarget(m.ids[0]) : m.toIdx); return; }
+  if (m && m.type === 'draw') { showSolverMove({ t: 'draw' }); return; }
+  const moves = usefulMoves();
+  if (moves.length) { const u = moves[0]; showHintMove(u.ids, u.toType, u.toIdx); return; }
+  showSolverMove({ t: 'draw' });
+}
+
+/* look back through the undo history for the most recent position that can still be won.
+   If a position can be won, every earlier one can too, so a binary search finds it quickly. */
+function findWinnableBack(maxMs = 7000) {
+  const keep = G, t0 = clockMs(), n = H.length;
+  const memo = new Map();
+  const proven = j => {
+    if (memo.has(j)) return memo.get(j);
+    G = JSON.parse(H[j]);
+    let sol = solve(300, 'dfs');
+    if (!sol.path && sol.timedOut) sol = solve(350, 'best');
+    const r = sol.path && sol.path.length ? sol : null;
+    memo.set(j, r);
+    return r;
+  };
+  try {
+    if (!n) return null;
+    if (!proven(0)) return null;
+    let lo = 0, hi = n - 1;            // lo is proven winnable
+    while (lo < hi && clockMs() - t0 < maxMs) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (proven(mid)) lo = mid; else hi = mid - 1;
+    }
+    return { steps: n - lo, sol: memo.get(lo) };
+  } finally { G = keep; }
+}
+
 function showHintMove(ids, toType, toIdx) {
   const dest = toType === 'found'
     ? (G.found[toIdx].length ? cardEl[top(G.found[toIdx])] : slotEl['f' + toIdx])
@@ -535,13 +809,41 @@ function newGame(confirmFirst, sameSeed) {
   if (inProgress) { ST['d' + G.draw].streak = 0; saveStats(); }
   endTracking(sameSeed ? 'restart' : 'new_game');
   stopWinAnimation();
-  const seed = sameSeed && G ? G.seed : (Math.random() * 2 ** 31) | 0;
-  G = newGameState(seed, S.draw, S.vegas);
-  G.playId = playTracking?.newRound();
-  H = []; hintIdx = 0; stuckShown = false;
-  saveGame();
-  dealAnimation();
-  updateHud(); updateBar();
+  const deal = seed => {
+    G = newGameState(seed, S.draw, S.vegas);
+    G.playId = playTracking?.newRound();
+    H = []; hintIdx = 0; stuckShown = false;
+    saveGame();
+    dealAnimation();
+    updateHud(); updateBar();
+  };
+  if (sameSeed && G) { deal(G.seed); return; }
+  // only deal games that can be won: shuffle until the solver finds a winning line
+  if (!G) { deal(findWinnableSeed(S.draw, S.vegas)); return; }   // very first game: deal right away
+  busy = true;
+  toast('Kaarten schudden…');
+  setTimeout(() => {
+    let seed;
+    try { seed = findWinnableSeed(S.draw, S.vegas); } finally { busy = false; }
+    hideToast();
+    deal(seed);
+  }, 30);
+}
+
+function findWinnableSeed(draw, vegas, maxMs = 6000) {
+  const keep = G, t0 = clockMs();
+  let seed = (Math.random() * 2 ** 31) | 0;
+  try {
+    for (let tries = 0; tries < 60; tries++) {
+      seed = (Math.random() * 2 ** 31) | 0;
+      G = newGameState(seed, draw, vegas);
+      let sol = solve(300, 'dfs');
+      if (!sol.path && sol.timedOut) sol = solve(300, 'best');
+      if (sol.path) return seed;
+      if (clockMs() - t0 > maxMs) break;   // very unlikely: give a normal deal rather than wait
+    }
+    return seed;
+  } finally { G = keep; }
 }
 
 /* ================= Layout & rendering ================= */
@@ -1031,6 +1333,7 @@ setInterval(() => {
 let dialogPausesClock = true;
 
 /* ================= Toast ================= */
+function hideToast() { clearTimeout(toast.t); $('toast').classList.remove('show'); }
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200);
@@ -1354,6 +1657,6 @@ function boot() {
   }
 }
 // testing hook
-window.__patience = { analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
+window.__patience = { planNextAction, recentPositions, solve, findWinnableBack, smartHint, get plan() { return plan; }, findWinnableSeed, get busy() { return busy; }, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
 boot();
 })();
