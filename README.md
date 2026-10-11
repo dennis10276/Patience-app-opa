@@ -17,7 +17,7 @@ Patience (Klondike) kaartspel in het Nederlands, zonder reclame. Werkt als web-a
 - Spel wordt automatisch bewaard
 
 ## Kaarten
-De klassieke kaartafbeeldingen (map `cards/`) komen uit *Vector Playing Cards* van Byron Knoll, vrijgegeven als CC0 / publiek domein (https://opengameart.org/content/playing-cards-vector-png). Voor heer, vrouw en boer zijn de "2"-versies (met plaatjes) gebruikt; voor schoppen-aas de eenvoudige versie. In `cards/groot/` staan dezelfde kaarten met de hoekcijfers 1,5× zo groot; de afbeelding in het midden is daarvoor iets kleiner gemaakt, zodat de cijfers niets van de afbeelding bedekken. In de instellingen kun je ook kiezen voor de zelf getekende Franse kaarten.
+De klassieke kaartafbeeldingen (map `cards/`) komen uit *Vector Playing Cards* van Byron Knoll, vrijgegeven als CC0 / publiek domein (https://opengameart.org/content/playing-cards-vector-png). Voor heer, vrouw en boer zijn de "2"-versies (met plaatjes) gebruikt; voor schoppen-aas de eenvoudige versie. In `cards/groot/` staan dezelfde kaarten (gemaakt vanuit de SVG-versies) met de hoekletter/-cijfer 1,5× zo groot en het kleurtekentje op de originele grootte; de afbeelding in het midden is daarvoor iets kleiner gemaakt, zodat niets van de afbeelding bedekt wordt. In de instellingen kun je ook kiezen voor de zelf getekende Franse kaarten.
 
 ## Bestanden
 - `index.html`, `style.css`, `game.js` – het spel

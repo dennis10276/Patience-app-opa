@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
 const LS_STATS = 'patience.stats.v1';
@@ -737,7 +737,7 @@ function computeLayout() {
   const topY = Math.max(gap, 6);
   L = {
     W, H: Hh, cw, ch, gap, fi, fs, side,
-    upOff: imgDeck() ? Math.round(ch * (large ? 0.38 : 0.26)) : Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
+    upOff: imgDeck() ? Math.round(ch * (large ? 0.32 : 0.26)) : Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
     downOff: Math.max(4, Math.round(ch * 0.1)),
     bottom: Hh - Math.max(6, gap),
     topY
