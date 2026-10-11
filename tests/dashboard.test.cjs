@@ -6,7 +6,7 @@ const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'dash'
 function dashboard(hash = '#' + 'a'.repeat(32), saved = new Map(), search = '') {
   let now = Date.parse('2026-10-11T22:30:00Z');
   const nodes = new Map(), intervals = [], streams = [], listeners = {};
-  const node = () => ({ textContent: '', value: '', children: [], style: {}, classList: { toggle() {} }, appendChild(c) { this.children.push(c); }, append(...c) { this.children.push(...c); }, replaceChildren() { this.children = []; } });
+  const node = () => ({ listeners: {}, addEventListener(k, fn) { this.listeners[k] = fn; }, textContent: '', value: '', children: [], style: {}, classList: { toggle() {} }, appendChild(c) { this.children.push(c); }, append(...c) { this.children.push(...c); }, replaceChildren() { this.children = []; } });
   const context = {
     Date: class extends Date { static now() { return now; } }, Intl, URLSearchParams, AbortController, setTimeout, clearTimeout,
     location: { hash, search, pathname: '/Patience-app-opa/dash/' }, history: { replaceState(a, b, value) { const next = new URL(value, 'https://example.com' + context.location.pathname + context.location.search + context.location.hash); context.location.hash = next.hash; context.location.search = next.search; context.location.pathname = next.pathname; } },
@@ -238,4 +238,20 @@ test('an explicit all-games bookmark survives reload when a different game was r
   assert.equal(a.nodes.get('game').value, 'all');
   const reloaded = dashboard(a.context.location.hash, saved, a.context.location.search);
   assert.equal(reloaded.nodes.get('game').value, 'all');
+});
+
+
+test('expanded session details stay open through live updates and clock refreshes', () => {
+  const a = dashboard(), r = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: false };
+  const record = { ...r, detail: detail(r) };
+  a.streams[0].emit('put', { path: '/', data: { one: record } });
+  const expanded = a.nodes.get('sessions').children[0].children[5].children[0];
+  expanded.open = true; expanded.listeners.toggle();
+  a.advance(10000);
+  assert.equal(a.nodes.get('sessions').children[0].children[5].children[0].open, true);
+  a.streams[0].emit('patch', { path: '/one', data: { seconds: 61 } });
+  const refreshed = a.nodes.get('sessions').children[0].children[5].children[0];
+  assert.equal(refreshed.open, true);
+  refreshed.open = false; refreshed.listeners.toggle(); a.advance(10000);
+  assert.equal(a.nodes.get('sessions').children[0].children[5].children[0].open, false);
 });
