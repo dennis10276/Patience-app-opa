@@ -16,7 +16,7 @@ function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val));
 
 /* ================= Settings ================= */
 const DEFAULTS = {
-  draw: 3, vegas: false, vegasCumulative: true,
+  draw: 1, vegas: false, vegasCumulative: true,
   deck: 'klassiek', letters: 'en', size: 'groot', hand: 'rechts',
   sound: true, showTime: true, unveil: false, colHeight: 'dynamisch',
   shadows: true, back: 'blauw', felt: 'groen', speed: 'normaal',
