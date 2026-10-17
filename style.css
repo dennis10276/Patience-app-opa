@@ -185,10 +185,11 @@ body.jumbo .face > svg text { font-kerning: none; }
 .card.peek .face::after { content: ""; position: absolute; inset: 0; background: rgba(20, 40, 90, .38); }
 
 /* hints and feedback */
-.card.hint .face, .slot.hint, .card.hint .back { animation: hint 1.4s ease-in-out; }
+.card.hint .face, .slot.hint, .card.hint .back { animation: hint 1.2s ease-in-out infinite alternate; }
+.slot.hint { border-color: #ffd400; }
 @keyframes hint {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 220, 0, 0); }
-  20%, 70% { box-shadow: 0 0 0 4px #ffd400, 0 0 14px 4px rgba(255,212,0,.8); }
+  from { box-shadow: 0 0 0 4px #ffd400, 0 0 10px 3px rgba(255,212,0,.6); }
+  to   { box-shadow: 0 0 0 6px #ffd400, 0 0 22px 9px rgba(255,212,0,.95); }
 }
 .card.shake .flip { animation: shake .35s; }
 @keyframes shake {

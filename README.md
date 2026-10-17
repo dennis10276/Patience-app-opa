@@ -24,7 +24,7 @@ De klassieke kaartafbeeldingen (map `cards/`) komen uit *Vector Playing Cards* v
 - `cards/` – de 52 kaartafbeeldingen (`cards/groot/` met grote hoekcijfers)
 - `manifest.webmanifest`, `sw.js`, `icons/` – beginscherm-icoon en offline werken
 
-Bij een nieuwe versie: verhoog `CACHE` in `sw.js` (en `?v=` in `index.html`) zodat iPhones de update meteen ophalen.
+Bij een nieuwe versie: verhoog `VERSION` in `game.js` én `version.json` (de test controleert dat ze gelijk zijn), en `CACHE` in `sw.js` en `?v=` in `index.html`. Een app die openstaat kijkt elke paar minuten, en meteen als hij weer op het scherm komt, naar `version.json`. Is er een nieuwere versie, dan herlaadt hij vanzelf op een rustig moment (geen menu open, niets in beweging, een paar seconden niet aangeraakt). Het spel loopt daarna gewoon verder.
 
 ## Speeltijd voor de familie
 

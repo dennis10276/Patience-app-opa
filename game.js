@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.15.0';
+const VERSION = '1.16.0';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
@@ -700,10 +700,15 @@ function showHintMove(ids, toType, toIdx) {
   sfx('hint');
 }
 
+/* hint: a thick yellow glow around the card(s) and the place to go, until the next tap */
+let hintEls = [];
+function clearHint() { hintEls.forEach(el => el.classList.remove('hint')); hintEls = []; }
 function flash(els) {
-  els.forEach(el => { if (!el) return; el.classList.remove('hint'); void el.offsetWidth; el.classList.add('hint'); });
-  setTimeout(() => els.forEach(el => el && el.classList.remove('hint')), 1500);
+  clearHint();
+  hintEls = els.filter(Boolean);
+  hintEls.forEach(el => el.classList.add('hint'));
 }
+document.addEventListener('pointerdown', clearHint, true);
 function shake(ids) {
   ids.forEach(i => { const el = cardEl[i]; el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); setTimeout(() => el.classList.remove('shake'), 400); });
 }
@@ -1678,7 +1683,48 @@ function boot() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 }
+/* ================= Updates while the app stays open =================
+   iPhones keep a home-screen app in memory, so it is rarely really restarted. Like the Mahjong app we
+   look at version.json when the app comes back on screen (and every few minutes), and reload by
+   ourselves at a quiet moment: no pop-up, nothing moving, not touched for a few seconds. The game is
+   saved after every move, so after the reload he simply continues. */
+const verNewer = (a, b) => { a = String(a).split('.'); b = String(b).split('.'); for (let i = 0; i < Math.max(a.length, b.length); i++) { const x = +a[i] || 0, y = +b[i] || 0; if (x !== y) return x > y; } return false; };
+const LS_UPD = 'patience.update.v1';
+let updTarget = '', updLast = 0, updBusy = false, lastTouch = 0;
+document.addEventListener('pointerdown', () => { lastTouch = Date.now(); }, true);
+async function checkUpdate(force) {
+  if (!location.protocol.startsWith('http') || updBusy) return;
+  if (!updTarget && (force || Date.now() - updLast > 5 * 60000)) {
+    updLast = Date.now(); updBusy = true;
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      const v = r.ok ? await r.json() : null;
+      if (v && v.v && verNewer(v.v, VERSION)) {
+        // tried this version less than 10 minutes ago and still old: the website is not ready yet, wait
+        const tried = load(LS_UPD, null);
+        if (!(tried && tried.v === v.v && Date.now() - tried.at < 10 * 60000)) updTarget = String(v.v);
+      }
+    } catch (e) { /* offline: try again later */ } finally { updBusy = false; }
+  }
+  applyUpdate();
+}
+function applyUpdate() {
+  if (!updTarget || document.hidden) return false;
+  if (!$('modal').hidden || busy || drag || winRAF || hintBusy || Date.now() - lastTouch < 4000) return false;
+  if (G) saveGame();
+  store(LS_UPD, { v: updTarget, at: Date.now() });
+  toast('Nieuwe versie wordt geladen…');
+  // a new address (?v=...), so the phone surely fetches the new page and not a kept copy
+  const url = location.pathname + '?v=' + encodeURIComponent(updTarget);
+  updTarget = '';
+  setTimeout(() => location.replace(url), 1200);
+  return true;
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(true); });
+setInterval(() => { if (!document.hidden) checkUpdate(false); }, 5000);
+setTimeout(() => checkUpdate(true), 3000);
+
 // testing hook
-window.__patience = { planNextAction, recentPositions, solve, findWinnableBack, smartHint, get plan() { return plan; }, findWinnableSeed, get busy() { return busy; }, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
+window.__patience = { checkUpdate, get updTarget() { return updTarget; }, planNextAction, recentPositions, solve, findWinnableBack, smartHint, get plan() { return plan; }, findWinnableSeed, get busy() { return busy; }, moveCards: (...a) => moveCards(...a), foundTarget, analyse, get H() { return H; }, get G() { return G; }, set G(v) { G = v; }, render: () => { render(); updateHud(); }, afterChange: () => afterChange(), usefulMoves, autoMove, drawStock, undo, newGame, hint, S, ST, locate, layout: () => L };
 boot();
 })();
