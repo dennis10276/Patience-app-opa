@@ -175,6 +175,8 @@ body.shadows .card.drag .face { box-shadow: 0 6px 14px rgba(0,0,0,.45); }
 .face > svg, .face > img { position: absolute; inset: 0; width: 100%; height: 100%; }
 .face > img { pointer-events: none; -webkit-user-drag: none; user-select: none; }
 body.imgdeck .face { background: transparent; border: 0; }
+body.jumbo .face { background: #fff; border: 1px solid #8f8f8f; }
+body.jumbo .face > svg text { font-kerning: none; }
 .ld-fan .fc img { width: 100%; height: 100%; display: block; }
 .ld-fan .fc { position: absolute; }
 .ld-fan .fc > svg.bigidx, .ld-fan .fc > img { position: absolute; inset: 0; width: 100%; height: 100%; }

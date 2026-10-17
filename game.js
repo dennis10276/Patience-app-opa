@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 
-const VERSION = '1.14.1';
+const VERSION = '1.15.0';
 const playTracking = window.PatienceTracking;
 const LS_GAME = 'patience.game.v1';
 const LS_SET = 'patience.settings.v1';
@@ -17,7 +17,7 @@ function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val));
 /* ================= Settings ================= */
 const DEFAULTS = {
   draw: 1, vegas: false, vegasCumulative: true,
-  deck: 'klassiek', letters: 'en', size: 'groot', hand: 'rechts',
+  deck: 'klassiek', letters: 'en', size: 'extra', hand: 'rechts',
   sound: true, showTime: true, unveil: false, colHeight: 'dynamisch',
   shadows: true, back: 'blauw', felt: 'groen', speed: 'normaal',
   autoFinish: true, tapMove: true,
@@ -25,6 +25,8 @@ const DEFAULTS = {
 };
 const S = Object.assign({}, DEFAULTS, load(LS_SET, {}));
 S.bar = Object.assign({}, DEFAULTS.bar, S.bar || {});
+// 1.15: everyone gets the new extra large, easy to read cards once (can be changed back in the settings)
+if (!S.xl) { S.size = 'extra'; S.xl = 1; store(LS_SET, S); }
 function saveSettings() { store(LS_SET, S); }
 
 /* ================= Stats ================= */
@@ -1011,18 +1013,36 @@ function faceSvg(id, standalone) {
   const bg = standalone ? `<rect x=".5" y=".5" width="99" height="139" rx="7" fill="#fdfdfb" stroke="#999"/>` : '';
   return `<svg${ns} viewBox="0 0 100 140" preserveAspectRatio="none">${bg}${index}<g transform="rotate(180 50 70)">${index}</g>${body}</svg>`;
 }
+/* extra large, easy to read cards: a big rank and suit across the top (the part you see in a column),
+   a big suit (or the court picture) below */
+const jumbo = () => S.size === 'extra';
+const JRED = '#d40c1f', JBLK = '#111111';
+const ART = id => `cards/${{ 11: 'jack', 12: 'queen', 13: 'king' }[rankOf(id)]}_of_${['spades', 'hearts', 'diamonds', 'clubs'][suitOf(id)]}.png`;
+function jumboFace(id) {
+  const r = rankOf(id), s = suitOf(id), col = isRed(id) ? JRED : JBLK, t = rankText(r);
+  const fs = t.length > 1 ? 66 : 76;
+  const tl = t.length > 1 ? ' textLength="58" lengthAdjust="spacingAndGlyphs"' : '';
+  const rank = `<text x="${t.length > 1 ? 3 : 4}" y="59" font-family="-apple-system,'Helvetica Neue',Helvetica,Arial,sans-serif" font-weight="800" font-size="${fs}" fill="${col}"${tl}>${t}</text>`;
+  const pip = pipAt(s, 79, 33, 34, false, col);
+  let body;
+  if (r > 10) {
+    body = `<svg x="7" y="68" width="86" height="72" viewBox="38 38 226 189" preserveAspectRatio="xMidYMin slice"><image href="${ART(id)}" width="300" height="436"/></svg>`
+      + `<rect x="7" y="68" width="86" height="72" fill="none" stroke="${col}" stroke-width="1.2"/>`;
+  } else body = pipAt(s, 50, 104, r === 1 ? 64 : 54, false, col);
+  return `<svg viewBox="0 0 100 145" preserveAspectRatio="none">${rank}${pip}${body}</svg>`;
+}
 /* image deck: "Vector Playing Cards" by Byron Knoll (CC0 / public domain) */
 const CARD_FILE = id => {
   const r = rankOf(id), n = { 1: 'ace', 11: 'jack', 12: 'queen', 13: 'king' }[r] || String(r);
   return `cards/${S.size === 'groot' ? 'groot/' : ''}${n}_of_${['spades', 'hearts', 'diamonds', 'clubs'][suitOf(id)]}.png`;
 };
 const imgDeck = () => S.deck !== 'getekend';
-const cardRatio = () => imgDeck() ? 1.452 : 1.4;
-const faceHtml = id => imgDeck()
+const cardRatio = () => jumbo() ? 1.45 : imgDeck() ? 1.452 : 1.4;
+const faceHtml = id => jumbo() ? jumboFace(id) : imgDeck()
   ? `<img src="${CARD_FILE(id)}" alt="" draggable="false">`
   : faceSvg(id, false);
 const preloaded = [];
-function preloadCards() { if (!imgDeck()) return; preloaded.length = 0; for (let id = 0; id < 52; id++) { const im = new Image(); im.src = CARD_FILE(id); preloaded.push(im); } }
+function preloadCards() { if (!imgDeck() && !jumbo()) return; preloaded.length = 0; for (let id = 0; id < 52; id++) { if (jumbo() && rankOf(id) < 11) continue; const im = new Image(); im.src = jumbo() ? ART(id) : CARD_FILE(id); preloaded.push(im); } }
 
 function buildCards() {
   board.innerHTML = '';
@@ -1044,21 +1064,22 @@ function refreshFaces() { for (let id = 0; id < 52; id++) cardEl[id].querySelect
 
 function computeLayout() {
   const W = board.clientWidth, Hh = board.clientHeight;
-  const large = S.size === 'groot';
+  const xl = jumbo();
+  const large = S.size === 'groot' || xl;
   const right = S.hand !== 'links';
   const side = document.body.classList.contains('landscape');
   let gap, cw;
   if (!side) {
-    gap = Math.max(3, Math.round(W * (large ? 0.009 : 0.016)));
+    gap = xl ? Math.max(2, Math.round(W * 0.006)) : Math.max(3, Math.round(W * (large ? 0.009 : 0.016)));
     cw = (W - gap * 8) / 7;
-    const maxByH = (Hh - gap * 3) / (cardRatio() * (large ? 3.3 : 3.7));
-    cw = Math.floor(Math.min(cw, maxByH, 150));
+    const maxByH = (Hh - gap * 3) / (cardRatio() * (xl ? 3.6 : large ? 3.3 : 3.7));
+    cw = Math.floor(Math.min(cw, maxByH, xl ? 190 : 150));
   } else {
     // landscape: foundations in one side column, stock + waste in the other, tableau in the middle
-    gap = Math.max(3, Math.round(Hh * (large ? 0.014 : 0.022)));
+    gap = Math.max(xl ? 2 : 3, Math.round(Hh * (xl ? 0.008 : large ? 0.014 : 0.022)));
     cw = (W - gap * 13) / 9;
     const maxByH = (Hh - gap * 5) / 4 / cardRatio();
-    cw = Math.floor(Math.min(cw, maxByH * (large ? 1.12 : 1), 150));
+    cw = Math.floor(Math.min(cw, maxByH * (large ? 1.12 : 1), xl ? 190 : 150));
   }
   const ch = Math.round(cw * cardRatio());
   const fi = Math.round(cw * (large ? 0.42 : 0.33));   // index font size
@@ -1066,7 +1087,7 @@ function computeLayout() {
   const topY = Math.max(gap, 6);
   L = {
     W, H: Hh, cw, ch, gap, fi, fs, side,
-    upOff: imgDeck() ? Math.round(ch * (large ? 0.32 : 0.26)) : Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
+    upOff: xl ? Math.round(ch * 66 / 145) : imgDeck() ? Math.round(ch * (large ? 0.32 : 0.26)) : Math.round(cw * (idxMetrics().sy + idxMetrics().ss + 4) / 100),
     downOff: Math.max(4, Math.round(ch * 0.1)),
     bottom: Hh - Math.max(6, gap),
     topY
@@ -1097,8 +1118,9 @@ function computeLayout() {
   }
   const st = document.documentElement.style;
   st.setProperty('--cw', cw + 'px'); st.setProperty('--ch', ch + 'px');
-  st.setProperty('--cr', Math.max(3, Math.round(cw * (imgDeck() ? 0.05 : 0.08))) + 'px');
-  document.body.classList.toggle('imgdeck', imgDeck());
+  st.setProperty('--cr', Math.max(3, Math.round(cw * (imgDeck() || xl ? 0.06 : 0.08))) + 'px');
+  document.body.classList.toggle('imgdeck', imgDeck() && !xl);
+  document.body.classList.toggle('jumbo', xl);
   st.setProperty('--fi', fi + 'px'); st.setProperty('--fs', fs + 'px');
 }
 
@@ -1398,10 +1420,10 @@ function showSettings() {
     ${row('Dichte kaarten tonen', onoff('unveil'))}
   </div>
   <div class="set-group"><h3>Weergave</h3>
-    ${row('Kaartgrootte', seg('size', [['normaal', 'Normaal'], ['groot', 'Groot']]))}
+    ${row('Kaartgrootte', seg('size', [['normaal', 'Normaal'], ['groot', 'Groot'], ['extra', 'Extra groot']]))}
     ${row('Kaarten', seg('deck', [['klassiek', 'Klassiek'], ['getekend', 'Frans getekend']]))}
     ${row('Kaartletters', seg('letters', [['en', 'K Q J'], ['nl', 'H V B'], ['fr', 'R D V']]))}
-    <p class="note">Bij “Groot” hebben de klassieke kaarten extra grote hoekcijfers. De kaartletters gelden voor de Frans getekende kaarten.</p>
+    <p class="note">“Extra groot” is het makkelijkst te lezen: grote cijfers en tekens over de hele kaartbreedte. Bij “Groot” hebben de klassieke kaarten grotere hoekcijfers. De kaartletters gelden voor “Extra groot” en de Frans getekende kaarten.</p>
     ${row('Hand', seg('hand', [['rechts', 'Rechtshandig'], ['links', 'Linkshandig']]))}
     ${row('Kolomhoogte', seg('colHeight', [['dynamisch', 'Dynamisch'], ['vast', 'Vast']]))}
     ${row('Tijd tonen', onoff('showTime'))}
@@ -1607,7 +1629,7 @@ function buildFan() {
     const d = document.createElement('div'); d.className = 'fc';
     d.style.transform = `translateX(${dx}px) rotate(${rot}deg)`;
     d.style.animationDelay = (k * 90) + 'ms';
-    d.innerHTML = faceHtml(id).replace(/cp(\d+)/g, 'lp$1');
+    d.innerHTML = imgDeck() ? `<img src="${CARD_FILE(id)}" alt="" draggable="false">` : faceSvg(id, false).replace(/cp(\d+)/g, 'lp$1');
     fan.appendChild(d);
   });
 }
