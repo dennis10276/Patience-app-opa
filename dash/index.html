@@ -1,33 +1,110 @@
 <!doctype html>
 <html lang="nl">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="robots" content="noindex, nofollow"><title>Opa's speeloverzicht · Patience en Sudoku</title>
-<style>
-:root {color-scheme:light dark;--bg:#f4f3ef;--surface:#fcfcfb;--line:#e2e0da;--ink:#161614;--muted:#65655f;--accent:#2a78d6;--soft:#e9eef4;--seq0:#eeede9;--seq1:#cde2fb;--seq2:#9ec5f4;--seq3:#6da7ec;--seq4:#3987e5;--seq5:#256abf}
-@media(prefers-color-scheme:dark){:root{--bg:#121211;--surface:#1a1a19;--line:#33332f;--ink:#f7f7f2;--muted:#b4b4aa;--soft:#242422;--seq0:#242422;--seq1:#173257;--seq2:#184f95;--seq3:#256abf;--seq4:#3987e5;--seq5:#6da7ec}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,'Segoe UI',sans-serif}main{max-width:1120px;margin:auto;padding:20px 18px 48px}h1{font-size:24px;margin:0}h2{font-size:16px;margin:0 0 12px}h3{font-size:14px;margin:0 0 4px}p{margin:6px 0 10px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.sub,.note{font-size:12px;color:var(--muted)}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:12px 0 18px}label{color:var(--muted);font-size:12px}select,input,button{font:inherit;color:var(--ink);background:var(--surface);padding:7px 10px;border:1px solid var(--line);border-radius:9px}button,summary{cursor:pointer}select{max-width:100%}button:disabled{opacity:.5}#status{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:6px 10px;white-space:nowrap}.playing{color:#178743}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px}.card,.panel{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:15px;min-width:0}.card span{font-size:12px;color:var(--muted)}.card b{display:block;font-size:25px;margin-top:4px;letter-spacing:-.5px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px}.bar-row{display:grid;grid-template-columns:minmax(85px,1.1fr) minmax(70px,2fr) 65px;align-items:center;gap:8px;margin:9px 0;font-size:12px}.bar{height:9px;background:var(--soft);border-radius:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent);border-radius:8px}.bar-row>span:last-child{text-align:right;font-variant-numeric:tabular-nums}#heatmap{display:grid;grid-template-columns:24px repeat(24,minmax(5px,1fr));gap:3px;font-size:10px;text-align:center;align-items:center}.heat-cell{height:20px;border-radius:3px;display:block}.heat-0{background:var(--seq0)}.heat-1{background:var(--seq1)}.heat-2{background:var(--seq2)}.heat-3{background:var(--seq3)}.heat-4{background:var(--seq4)}.heat-5{background:var(--seq5)}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;padding:9px 7px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:11px;color:var(--muted);white-space:nowrap}td p{min-width:240px}summary{font-weight:600}details>summary{padding:6px 0}.history-day{border-top:1px solid var(--line)}.history-day>summary{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between;padding:14px 4px}.history-day>summary:before{content:'▸';color:var(--muted)}.history-day[open]>summary:before{content:'▾'}.history-day>summary strong{flex:1}.history-day>summary span{font-size:12px;color:var(--muted);font-weight:400}.attempt{margin:0 0 10px 16px;border-left:3px solid var(--accent);padding:10px 14px;background:var(--soft);border-radius:0 8px 8px 0}.attempt p{margin:3px 0}#signals p{font-size:12px;color:var(--muted)}.technical{margin-top:14px}.technical>.scroll{max-height:460px}.rename{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}.analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.wide{margin-bottom:12px}#notice{color:#b44636}#naming{margin:8px 0 18px}#overview[hidden],#naming[hidden],[hidden]{display:none!important}
-@media(max-width:700px){main{padding:14px 12px 32px}.grid,.analysis-grid{grid-template-columns:1fr}.cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.card,.panel{padding:12px}.card b{font-size:23px}.top{align-items:flex-start}h1{font-size:21px}.history-day>summary{gap:6px}.history-day>summary span{width:100%;padding-left:16px}.controls{gap:7px}.heat-cell{height:16px}#heatmap{gap:2px}}
-</style>
-</head><body><main>
-<header class="top"><div><h1>Opa's speeloverzicht</h1><p class="sub">Patience en Sudoku · speeltijd, voortgang en hulp</p></div><span id="status" role="status">Verbinden…</span></header>
-<div id="notice" role="status"></div>
-<div class="controls"><label for="who">Speler</label><select id="who" disabled><option>Spelers laden…</option></select><button id="devicesToggle" type="button" class="note" hidden>Andere apparaten tonen</button><label for="game">Spel</label><select id="game"><option value="all">Alle spellen</option><option value="patience">Patience</option><option value="sudoku">Sudoku</option></select><label for="period">Periode</label><select id="period"><option value="7">7 dagen</option><option value="30" selected>30 dagen</option><option value="90">90 dagen</option></select></div>
-<p id="empty" class="note" hidden>Nog geen spelers. Apparaten verschijnen automatisch zodra erop wordt gespeeld.</p>
-<details id="naming" hidden><summary>Speler een naam geven</summary><form id="nameForm" class="rename"><label for="playerName">Naam</label><input id="playerName" maxlength="40" placeholder="Bijvoorbeeld Opa" required><button id="saveName">Opslaan</button></form><p id="nameStatus" role="status" class="note"></p></details>
-<div id="overview" hidden>
-<p id="gameSummary" class="note"></p>
-<div class="cards"><div class="card"><span>Vandaag gespeeld</span><b id="todayTime">—</b></div><div class="card"><span>Afgelopen 7 dagen</span><b id="weekTime">—</b></div><div class="card"><span>Vandaag begonnen</span><b id="todayGames">—</b></div><div class="card"><span>Voltooid in 7 dagen</span><b id="weekWins">—</b></div></div>
-<p id="lastPlayed" class="note"></p>
-<section aria-label="Spelinzichten">
-<div class="cards"><div class="card"><span>Pogingen in periode</span><b id="observedRounds">—</b></div><div class="card"><span>Daarvan voltooid</span><b id="observedCompleted">—</b></div><div class="card"><span>Actieve tijd per meetrecord (mediaan)</span><b id="typicalTime">—</b></div><div class="card"><span>Records met spelinformatie</span><b id="measuredSessions">—</b></div></div>
-<div class="grid"><section class="panel"><h2>Speeltijd per dag · 7 dagen</h2><div id="days"></div></section><section class="panel"><h2>Onderbrekingen en eindmeldingen</h2><div id="endings"></div><p id="endingEmpty" class="note">Nog geen uitgebreide eindmeldingen.</p><p class="note">Dit zijn appgebeurtenissen; persoonlijke redenen kunnen we niet vaststellen.</p></section></div>
-<div class="grid"><section class="panel"><h2>Wanneer speelt hij?</h2><div id="heatmap" aria-label="Speeltijd per weekdag en uur"></div><p id="preferredTimes" class="note"></p><details><summary>Uren en weekdagen in cijfers</summary><div class="analysis-grid"><div id="hours"></div><div id="weekdays"></div></div></details></section><section class="panel"><h2>Spelacties en mogelijke verbeterpunten</h2><div id="actionCounts"></div><div id="signals"></div></section></div>
-<section class="panel wide"><h2>Spel en niveau vergelijken</h2><div class="scroll"><table><thead><tr><th>Spel / stand</th><th>Pogingen</th><th>Voltooid</th><th>Hints</th><th>Fout / zet lukte niet</th></tr></thead><tbody id="modes"></tbody></table></div><p class="note">Hervattingen met dezelfde pogingcode tellen één keer. Een open poging kan later nog worden voltooid.</p></section>
-</section>
-<section class="panel wide"><h2>Speelgeschiedenis per dag</h2><p class="note">Open een dag voor de spellen, voortgang en gebruikte hulp. Hervattingen van dezelfde poging staan bij elkaar.</p><div id="history"></div></section>
-<p id="coverage" class="note"></p><p id="sudokuSummary" class="note">Sudoku, afgelopen 7 dagen: hints <b id="sudokuHints">0</b> · fouten <b id="sudokuMistakes">0</b></p>
-<details class="panel technical"><summary>Technische meetrecords en volledige details</summary><p class="note">Oude apps maakten losse blokken bij onderbrekingen. Nieuwe apps werken dezelfde poging per dag bij. De geschiedenis hierboven groepeert de beschikbare gegevens.</p><div class="scroll"><table><thead><tr><th>Wanneer</th><th>Spel</th><th>Speeltijd</th><th>Laatste melding</th><th>Voortgang</th><th>Speldetails</th></tr></thead><tbody id="sessions"></tbody></table></div></details>
-<p class="note">Tijden in Nederland. Alleen actieve tijd telt mee: zichtbaar spel, buiten menu's, tot maximaal 2 minuten na de laatste aanraking. Updates komen elke 30 seconden; offline gegevens volgen later. We laden de laatste 90 dagen. Voortgang meet kaarten op de vier stapels boven of goed ingevulde Sudoku-vakjes; nuttige tussenstappen hoeven geen stijging te geven. Oudere records missen de nieuwe metingen. Uurverdeling van oude records is een schatting.</p>
-</div><p class="note">Net als bij Mahjong kan iedereen met dit dashboard spelers en speelgegevens bekijken. Opa hoeft niets in te stellen.</p>
-</main><script src="../tracking-config.js?v=20"></script><script src="dashboard.js?v=18"></script></body></html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Speeloverzicht</title>
+<link rel="stylesheet" href="dashboard.css?v=2">
+</head>
+<body>
+<header class="band">
+  <div class="band-in">
+    <div class="bar-top">
+      <span class="brand"><i class="suit">♠</i><i class="grid9"></i>Speeloverzicht</span>
+      <label class="pick"><span class="sr">Speler</span><select id="who" disabled><option>Spelers laden…</option></select></label>
+    </div>
+    <div class="hero">
+      <div class="hero-main">
+        <h1 id="who-name">Laden…</h1>
+        <p id="status" class="status" role="status"><i aria-hidden="true"></i><span id="statusText">Verbinden…</span></p>
+      </div>
+      <div class="figs">
+        <div class="fig level" id="figLevelBox"><span>Sudoku-level</span><b id="figLevel">–</b><small id="figLevelSub"></small></div>
+        <div class="fig"><span>Vandaag</span><b id="figToday">–</b><small>gespeeld</small></div>
+        <div class="fig"><span>Afgelopen 7 dagen</span><b id="figWeek">–</b><small id="figWeekSub"></small></div>
+      </div>
+    </div>
+    <div class="filters">
+      <div class="seg" id="gameSeg" role="group" aria-label="Spel">
+        <button type="button" data-v="all">Alles</button><button type="button" data-v="sudoku">Sudoku</button><button type="button" data-v="patience">Patience</button>
+      </div>
+      <div class="seg" id="periodSeg" role="group" aria-label="Periode">
+        <button type="button" data-v="7">7 dagen</button><button type="button" data-v="30">30 dagen</button><button type="button" data-v="90">90 dagen</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <p id="notice" class="notice" role="status" hidden></p>
+
+  <section class="games" aria-label="Deze week per spel">
+    <article class="game sudoku" id="tileSudoku">
+      <h2>Sudoku <small>deze week</small></h2>
+      <p class="big" id="tileSudokuTime">–</p>
+      <dl>
+        <div><dt>uitgespeeld</dt><dd id="tileSudokuWins">0</dd></div>
+        <div><dt>begonnen</dt><dd id="tileSudokuGames">0</dd></div>
+        <div><dt>hints</dt><dd id="tileSudokuHints">0</dd></div>
+        <div><dt>fouten</dt><dd id="tileSudokuMistakes">0</dd></div>
+      </dl>
+      <p class="empty" id="tileSudokuEmpty" hidden>Nog niet gespeeld.</p>
+    </article>
+    <article class="game patience" id="tilePatience">
+      <h2>Patience <small>deze week</small></h2>
+      <p class="big" id="tilePatienceTime">–</p>
+      <dl>
+        <div><dt>uitgespeeld</dt><dd id="tilePatienceWins">0</dd></div>
+        <div><dt>begonnen</dt><dd id="tilePatienceGames">0</dd></div>
+      </dl>
+      <p class="empty" id="tilePatienceEmpty" hidden>Nog niet gespeeld.</p>
+    </article>
+  </section>
+
+  <div class="cols">
+    <section class="panel" aria-labelledby="weekTitle">
+      <h2 id="weekTitle">Speeltijd per dag <small>in minuten</small></h2>
+      <div id="weekChart" class="chart"></div>
+      <p class="legend" id="weekLegend"><i class="sw sudoku"></i>Sudoku <i class="sw patience"></i>Patience</p>
+    </section>
+    <section class="panel" id="levelSec" aria-labelledby="levelTitle">
+      <h2 id="levelTitle">Sudoku-level <small id="periodLabel">30 dagen</small></h2>
+      <div id="levelChart" class="chart level"></div>
+      <p class="empty" id="levelEmpty">Het level verschijnt zodra opa Sudoku speelt met de nieuwste versie van de app.</p>
+    </section>
+  </div>
+
+  <div class="cols">
+    <section class="panel" aria-labelledby="sigTitle">
+      <h2 id="sigTitle">Goed om te weten</h2>
+      <ul id="signals" class="signals"></ul>
+    </section>
+    <section class="panel" aria-labelledby="whenTitle">
+      <h2 id="whenTitle">Wanneer speelt hij?</h2>
+      <div id="heatmap" class="heat" aria-label="Speeltijd per weekdag en uur"></div>
+      <p class="sub" id="whenText"></p>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="histTitle">
+    <h2 id="histTitle">Speelmomenten</h2>
+    <div id="history" class="history"></div>
+  </section>
+
+  <section class="panel devices" aria-labelledby="devicesTitle">
+    <h2 id="devicesTitle">Apparaten</h2>
+    <p class="sub">Op een iPhone heeft elke app op het beginscherm een eigen code, dus Patience en Sudoku zijn twee "apparaten". Geef ze dezelfde naam, dan tellen ze als één speler.</p>
+    <div id="devices"></div>
+    <button type="button" id="moreDevices" class="link" hidden>Apparaten zonder naam tonen</button>
+  </section>
+
+  <footer class="foot">
+    Alleen actieve speeltijd telt: het spel in beeld, buiten menu's, tot 2 minuten na de laatste aanraking. Tijden in Nederland; de laatste 90 dagen worden geladen.
+    Iedereen met dit adres kan het overzicht bekijken. Opa hoeft niets in te stellen.
+  </footer>
+</main>
+<script src="../tracking-config.js?v=21"></script>
+<script src="dashboard.js?v=19"></script>
+</body>
+</html>

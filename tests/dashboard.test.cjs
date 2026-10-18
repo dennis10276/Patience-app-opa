@@ -2,324 +2,160 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
-const source = fs.readFileSync(require('node:path').join(__dirname, '..', 'dash', 'dashboard.js'), 'utf8');
-function dashboard(hash = '#' + 'a'.repeat(32), saved = new Map(), search = '') {
-  let now = Date.parse('2026-10-11T22:30:00Z');
-  const nodes = new Map(), intervals = [], streams = [], listeners = {};
-  const node = () => ({ listeners: {}, addEventListener(k, fn) { this.listeners[k] = fn; }, textContent: '', value: '', children: [], style: {}, classList: { toggle() {} }, appendChild(c) { this.children.push(c); }, append(...c) { this.children.push(...c); }, replaceChildren() { this.children = []; } });
+const path = require('node:path');
+const source = fs.readFileSync(path.join(__dirname, '..', 'dash', 'dashboard.js'), 'utf8');
+
+const A = 'a'.repeat(32), B = 'b'.repeat(32), C = 'c'.repeat(32), D = 'd'.repeat(32);
+function dashboard(hash = '', saved = new Map(), search = '') {
+  let now = Date.parse('2026-10-18T10:30:00Z');
+  const nodes = new Map(), intervals = [], streams = [], listeners = {}, fetches = [];
+  const node = () => ({
+    listeners: {}, children: [], textContent: '', value: '', hidden: false, className: '', dataset: {}, style: {},
+    classList: { toggle() {}, add() {}, remove() {} }, setAttribute() {}, addEventListener(k, fn) { this.listeners[k] = fn; },
+    appendChild(c) { this.children.push(c); return c; }, append(...c) { this.children.push(...c); }, replaceChildren(...c) { this.children = c; },
+    set innerHTML(v) { this._html = v; }, get innerHTML() { return this._html || ''; },
+  });
   const context = {
-    Date: class extends Date { static now() { return now; } }, Intl, URLSearchParams, AbortController, setTimeout, clearTimeout,
-    location: { hash, search, pathname: '/Patience-app-opa/dash/' }, history: { replaceState(a, b, value) { const next = new URL(value, 'https://example.com' + context.location.pathname + context.location.search + context.location.hash); context.location.hash = next.hash; context.location.search = next.search; context.location.pathname = next.pathname; } },
-    localStorage: { getItem: k => saved.get(k), setItem: (k, v) => saved.set(k, v) },
-    async fetch(url, options) { return { ok: true }; },
+    Date: class extends Date { static now() { return now; } }, Intl, URLSearchParams, AbortController, setTimeout() { return 0; }, clearTimeout() {},
+    location: { hash, search, pathname: '/Patience-app-opa/dash/' },
+    history: { replaceState(a, b, value) { const u = new URL(value, 'https://x.test' + context.location.pathname); context.location.hash = u.hash; context.location.search = u.search; } },
+    localStorage: { getItem: k => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v) },
+    async fetch(url, options) { fetches.push({ url, options }); return { ok: true }; },
     PATIENCE_TRACKING: { databaseUrl: 'https://example.firebasedatabase.app' },
-    document: { hidden: false, getElementById(id) { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); }, createElement: node, addEventListener(k, fn) { listeners[k] = fn; } },
+    document: { hidden: false, title: '', getElementById(id) { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); }, createElement: node, addEventListener(k, fn) { listeners[k] = fn; } },
     addEventListener(k, fn) { listeners[k] = fn; }, setInterval(fn) { intervals.push(fn); },
     EventSource: class {
       constructor(url) { this.url = url; this.listeners = {}; streams.push(this); }
       addEventListener(k, fn) { this.listeners[k] = fn; }
       close() { this.closed = true; }
       emit(kind, data) { this.listeners[kind]({ data: JSON.stringify(data) }); }
-    }
+    },
   };
-  context.window = context; vm.runInNewContext(source, context);
-  return { nodes, streams, context, listeners, get now() { return now; }, advance(ms) { now += ms; intervals.forEach(fn => fn()); } };
+  context.window = context;
+  vm.runInNewContext(source, context);
+  const text = id => nodes.get(id)?.textContent;
+  const stream = part => streams.filter(s => !s.closed && s.url.includes(part)).pop();
+  return { nodes, streams, context, listeners, fetches, text, stream, api: context.OpaDashboard,
+    get now() { return now; }, advance(ms) { now += ms; intervals.forEach(fn => fn()); } };
 }
-test('Amsterdam day totals, week totals and live status use session summaries', () => {
-  const a = dashboard();
-  a.streams[0].emit('put', { path: '/', data: {
-    today: { start: a.now - 1800000, last: a.now, seconds: 1800, games: 1, wins: 0, active: true },
-    yesterday: { start: a.now - 5400000, last: a.now - 4800000, seconds: 600, games: 2, wins: 1, active: false }
-  } });
-  assert.equal(a.nodes.get('todayTime').textContent, '30 min');
-  assert.equal(a.nodes.get('weekTime').textContent, '40 min');
-  assert.equal(a.nodes.get('todayGames').textContent, '1 spel');
-  assert.equal(a.nodes.get('status').textContent, 'Nu aan het spelen');
-  a.advance(80000);
-  assert.equal(a.nodes.get('status').textContent, 'Nu niet actief');
-});
-test('stream updates replace existing sessions and support patches and removals', () => {
-  const a = dashboard(), s = a.streams[0];
-  const record = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: true };
-  s.emit('put', { path: '/', data: { one: record } });
-  s.emit('put', { path: '/one', data: { ...record, seconds: 120 } });
-  assert.equal(a.nodes.get('todayTime').textContent, '2 min');
-  assert.equal(a.nodes.get('sessions').children.length, 1);
-  s.emit('patch', { path: '/one', data: { active: false } });
-  assert.equal(a.nodes.get('status').textContent, 'Nu niet actief');
-  s.emit('put', { path: '/one', data: null });
-  assert.equal(a.nodes.get('sessions').children.length, 0);
-  assert.equal(a.nodes.get('todayTime').textContent, '0 sec');
-});
-test('disconnects suppress live status and hidden tabs close their connection', () => {
-  const a = dashboard(), s = a.streams[0];
-  s.emit('put', { path: '/', data: { one: { start: a.now, last: a.now, seconds: 0, games: 1, wins: 0, active: true } } });
-  s.onerror(); assert.equal(a.nodes.get('status').textContent, 'Geen verbinding');
-  a.context.document.hidden = true; a.listeners.visibilitychange(); assert.equal(s.closed, true);
-  assert.equal(a.streams[1].closed, true);
-  a.context.document.hidden = false; a.listeners.visibilitychange(); assert.equal(a.streams.length, 4);
+const plain = v => JSON.parse(JSON.stringify(v));
+const rec = (now, o = {}) => ({ start: now - 600000, last: now, seconds: 600, games: 1, wins: 0, active: false, ...o });
+const sudoku = (now, o = {}) => rec(now, { app: 'sudoku', level: 'easy', daily: false, hints: 0, mistakes: 0, ...o });
+const detail = (r, o = {}) => ({ v: 2, round: 'e'.repeat(32), reason: 'menu', progress: 10, initial: 0, total: 40, lastAction: 'input', actionAt: r.last, lastProgressAt: r.last, maxGap: 30, ended: r.last, actions: { input: 10 }, ...o });
+
+test('records are checked: bad numbers, unknown apps and broken Sudoku data never count', () => {
+  const { api } = dashboard(), now = Date.parse('2026-10-18T10:00:00Z');
+  const good = rec(now), s = sudoku(now);
+  const list = api.sanitize({
+    good, s,
+    frac: { ...good, seconds: 1.5 }, future: { ...good, last: good.start - 1 }, app: { ...good, app: 'chess' },
+    lvl: { ...s, level: 'impossible' }, hints: { ...s, hints: -1 }, junk: 'x',
+    badDetail: { ...good, detail: { v: 2, round: 'nope' } },
+  }, A, 'iPhone');
+  assert.deepEqual(plain(list.map(r => r.id).sort()), ['good', 's']);
 });
 
-test('root dashboard discovers players and prefers Opa without a code', () => {
-  const a = dashboard(''), id = 'b'.repeat(32);
+test('the Sudoku level comes from the mode field and rejects nonsense', () => {
+  const { api } = dashboard();
+  assert.deepEqual(plain(api.parseLevel('L37|38')), { played: 37, reached: 38, daily: false });
+  assert.deepEqual(plain(api.parseLevel('D|12')), { played: null, reached: 12, daily: true });
+  for (const bad of ['L40|38', 'L0|3', 'X|3', 'L1|', '<img>|3', 3, null]) assert.equal(api.parseLevel(bad), null);
+});
+
+test('devices with the same name are one player; the usual spelling is shown', () => {
+  const { api } = dashboard();
+  const g = api.people({ [A]: { device: 'iPhone', name: 'Opa' }, [B]: { device: 'iPhone', name: 'OPa' }, [C]: { device: 'iPhone', name: ' opa ' }, [D]: { device: 'Computer' } });
+  const opa = [...g.values()].find(x => x.name);
+  assert.equal(opa.name, 'Opa'); assert.deepEqual(plain(opa.keys), [A, B, C].sort());
+  assert.equal([...g.values()].filter(x => !x.name).length, 1);
+});
+
+test('without a link the dashboard picks Opa and listens to every device of Opa', () => {
+  const a = dashboard();
   assert.ok(a.streams[0].url.endsWith('/players.json'));
-  a.streams[0].emit('put', { path: '/', data: { ['a'.repeat(32)]: { device: 'Computer' }, [id]: { device: 'iPad', name: 'Opa' } } });
-  assert.equal(a.nodes.get('who').children.length, 1);
-  a.nodes.get('devicesToggle').onclick();
-  assert.equal(a.nodes.get('who').children.length, 2);
-  assert.equal(a.nodes.get('who').value, id);
-  assert.equal(a.context.location.hash, '#' + id);
-  assert.ok(a.streams[1].url.includes('/sessions/' + id));
+  a.streams[0].emit('put', { path: '/', data: { [A]: { device: 'iPhone', name: 'Opa' }, [B]: { device: 'iPhone', name: 'OPa' }, [D]: { device: 'Computer', name: 'Test' } } });
+  assert.equal(a.text('who-name'), 'Opa');
+  assert.ok(a.stream('/sessions/' + A) && a.stream('/sessions/' + B));
+  assert.ok(!a.stream('/sessions/' + D));
+  assert.equal(a.context.location.hash, '#' + A);
 });
 
-test('switching players clears totals and ignores late events from old streams', () => {
-  const a = dashboard(), old = a.streams[0], id = 'b'.repeat(32);
-  const record = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: true };
-  old.emit('put', { path: '/', data: { one: record } });
-  a.streams[1].emit('put', { path: '/', data: { ['a'.repeat(32)]: { name: 'Opa' }, [id]: { device: 'Computer' } } });
-  a.nodes.get('who').value = id; a.nodes.get('who').onchange();
-  assert.equal(old.closed, true);
-  assert.equal(a.nodes.get('todayTime').textContent, '0 sec');
-  old.emit('put', { path: '/', data: { one: record } }); old.onerror();
-  assert.equal(a.nodes.get('sessions').children.length, 0);
-  a.streams[2].emit('put', { path: '/', data: {} });
-  assert.equal(a.nodes.get('status').textContent, 'Nu niet actief');
-  a.streams[1].emit('patch', { path: '/' + id, data: { name: '<script>hello</script>' } });
-  assert.equal(a.nodes.get('who').value, id);
-  assert.ok(a.nodes.get('who').children.some(n => n.textContent.includes('<script>')));
-});
-
-test('bookmarks and remembered selections survive an empty registry', () => {
-  const id = 'b'.repeat(32), saved = new Map([['patience.dashboard.player', id]]);
-  const a = dashboard('', saved);
-  a.streams[1].emit('put', { path: '/', data: null });
-  assert.equal(a.nodes.get('who').value, id);
-  const b = dashboard('#' + 'c'.repeat(32), saved);
-  assert.equal(b.nodes.get('who').value, 'c'.repeat(32));
-});
-
-test('empty registry and denied access explain the actual state', () => {
-  const a = dashboard(''); a.streams[0].emit('put', { path: '/', data: null });
-  assert.equal(a.nodes.get('empty').hidden, false); assert.equal(a.nodes.get('who').disabled, true);
-  a.streams[0].emit('cancel', {});
-  assert.match(a.nodes.get('notice').textContent, /Firebase-regels/);
-});
-
-test('fractional and out-of-range records cannot distort totals', () => {
-  const a = dashboard(), record = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: true };
-  a.streams[0].emit('put', { path: '/', data: { valid: record, invalid: { ...record, games: 0.5 }, huge: { ...record, seconds: 90001 } } });
-  assert.equal(a.nodes.get('todayGames').textContent, '1 spel');
-  assert.equal(a.nodes.get('sessions').children.length, 1);
-});
-
-test('renaming updates Firebase and preserves the selected player', async () => {
-  const a = dashboard(), id = 'a'.repeat(32); let request;
-  a.context.fetch = async (url, options) => { request = { url, data: JSON.parse(options.body) }; return { ok: true }; };
-  a.nodes.get('playerName').value = 'Opa';
-  await a.nodes.get('nameForm').onsubmit({ preventDefault() {} });
-  assert.ok(request.url.includes('/players/' + id));
-  assert.equal(request.data.name, 'Opa');
-  assert.equal(a.nodes.get('who').value, id);
-  assert.equal(a.nodes.get('nameStatus').textContent, 'Naam opgeslagen.');
-});
-
-test('combined totals include both games and filters keep their histories separate', () => {
-  const a = dashboard(), s = a.streams[0];
-  const common = { start: a.now - 600000, last: a.now, seconds: 600, games: 1, wins: 1, active: false };
-  const sudoku = { ...common, app: 'sudoku', level: 'hard', daily: true, hints: 2, mistakes: 1, active: true };
-  s.emit('put', { path: '/', data: { patience: common, sudoku } });
-  assert.equal(a.nodes.get('todayTime').textContent, '20 min');
-  assert.equal(a.nodes.get('weekWins').textContent, 2);
-  assert.equal(a.nodes.get('sudokuHints').textContent, 2);
-  assert.equal(a.nodes.get('sessions').children.length, 2);
-  a.nodes.get('game').value = 'patience'; a.nodes.get('game').onchange();
-  assert.equal(a.nodes.get('todayTime').textContent, '10 min');
-  assert.equal(a.nodes.get('todayGames').textContent, '1 spel');
-  assert.equal(a.nodes.get('status').textContent, 'Nu niet actief');
-  assert.equal(a.nodes.get('sessions').children.length, 1);
-  a.nodes.get('game').value = 'sudoku'; a.nodes.get('game').onchange();
-  assert.equal(a.nodes.get('status').textContent, 'Speelt nu Sudoku');
-  assert.match(a.nodes.get('sessions').children[0].children[5].textContent, /Moeilijk · Dagelijks/);
-  assert.equal(a.streams.length, 2, 'filtering reuses the stream instead of downloading history again');
-  assert.equal(a.context.location.search, '?game=sudoku');
-});
-
-test('Sudoku filter bookmarks override remembered games and keep the player on switch', () => {
-  const saved = new Map([['opa.dashboard.game', 'patience']]);
-  const a = dashboard('#' + 'a'.repeat(32), saved, '?game=sudoku');
-  assert.equal(a.nodes.get('game').value, 'sudoku');
-  a.nodes.get('who').value = 'b'.repeat(32); a.nodes.get('who').onchange();
-  assert.equal(a.context.location.search, '?game=sudoku');
-  assert.equal(a.context.location.hash, '#' + 'b'.repeat(32));
-  const b = dashboard('#' + 'a'.repeat(32), saved);
-  assert.equal(b.nodes.get('game').value, 'patience');
-});
-
-test('unknown apps and malformed Sudoku metadata are ignored', () => {
-  const a = dashboard(), common = { start: a.now, last: a.now, seconds: 0, games: 1, wins: 0, active: false };
-  a.streams[0].emit('put', { path: '/', data: {
-    legacy: common, unknown: { ...common, app: 'other' }, missing: { ...common, app: 'sudoku' },
-    fractional: { ...common, app: 'sudoku', level: 'easy', daily: false, hints: 0.5, mistakes: 0 }
-  } });
-  assert.equal(a.nodes.get('sessions').children.length, 1);
-  assert.equal(a.nodes.get('todayGames').textContent, '1 spel');
-});
-
-
-test('switching to all games replaces the previous query filter and survives reload', () => {
-  const saved = new Map(), id = 'a'.repeat(32);
-  const a = dashboard('#' + id, saved, '?game=sudoku');
-  a.nodes.get('game').value = 'all'; a.nodes.get('game').onchange();
-  assert.equal(a.context.location.search, '?game=all');
-  assert.equal(a.context.location.pathname, '/Patience-app-opa/dash/');
-  a.nodes.get('who').value = 'b'.repeat(32); a.nodes.get('who').onchange();
-  const reloaded = dashboard(a.context.location.hash, saved, a.context.location.search);
-  assert.equal(reloaded.nodes.get('game').value, 'all');
-  assert.equal(reloaded.nodes.get('who').value, 'b'.repeat(32));
-  const other = dashboard('#' + id, new Map(), '?game=sudoku&view=family');
-  other.nodes.get('game').value = 'all'; other.nodes.get('game').onchange();
-  assert.equal(other.context.location.search, '?game=all&view=family');
-});
-
-
-const detail = (r, values = {}) => ({ v: 1, round: 'c'.repeat(32), reason: 'pause', ended: r.last,
-  progress: 1, initial: 0, total: 52, actions: { hint: 1 }, lastAction: 'hint',
-  actionAt: r.last - 1000, lastProgressAt: r.last, maxGap: 1, ...values });
-
-test('insights deduplicate attempts across pauses, preserve legacy history and bucket Dutch play times', () => {
-  const a = dashboard(), r = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: false };
-  a.streams[0].emit('put', { path: '/', data: {
-    first: { ...r, detail: detail(r) },
-    resumed: { ...r, start: r.start - 60000, seconds: 120, games: 0, wins: 1, detail: detail(r, { reason: 'won', progress: 52, initial: 1, actions: { move: 2 }, lastAction: 'move' }) },
-    legacy: { ...r, seconds: 30, games: 0 }
-  } });
-  assert.equal(a.nodes.get('measuredSessions').textContent, 2);
-  assert.equal(a.nodes.get('observedRounds').textContent, 1);
-  assert.equal(a.nodes.get('observedCompleted').textContent, 1);
-  assert.equal(a.nodes.get('typicalTime').textContent, '1 min');
-  assert.equal(a.nodes.get('hours').children[0].children[2].textContent, '3 min');
-  assert.equal(a.nodes.get('weekdays').children[0].children[2].textContent, '3 min');
-  assert.equal(a.nodes.get('modes').children[0].children[1].textContent, 1);
-  assert.equal(a.nodes.get('sessions').children.length, 3);
-  assert.ok(a.nodes.get('coverage').textContent.includes('2 met uitgebreide'));
-});
-
-test('insight period and game filters do not mix apps or invent reasons for stale live records', () => {
-  const a = dashboard(), r = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: true };
-  const old = { ...r, start: r.start - 20 * 86400000, last: r.last - 20 * 86400000, active: false };
-  a.streams[0].emit('put', { path: '/', data: {
-    patience: { ...r, detail: detail(r, { reason: 'playing' }) },
-    sudoku: { ...old, app: 'sudoku', level: 'hard', daily: false, hints: 0, mistakes: 0, detail: detail(old, { round: 'd'.repeat(32), reason: 'lost', actions: { mistake: 3 }, lastAction: 'mistake' }) }
-  } });
-  assert.equal(a.nodes.get('observedRounds').textContent, 2);
-  a.nodes.get('period').value = '7'; a.nodes.get('period').onchange();
-  assert.equal(a.nodes.get('observedRounds').textContent, 1);
+test('time from both apps on one phone adds up, and the level and live status show', () => {
+  const a = dashboard('#' + B);
+  a.streams.find(s => s.url.endsWith('/players.json')).emit('put', { path: '/', data: { [A]: { device: 'iPhone', name: 'Opa' }, [B]: { device: 'iPhone', name: 'OPa' } } });
+  const now = a.now;
+  const live = sudoku(now, { active: true, wins: 1, start: now - 1200000, seconds: 1200 });
+  live.detail = detail(live, { reason: 'playing', ended: undefined, mode: 'L37|38' });
+  delete live.detail.ended;
+  a.stream('/sessions/' + A).emit('put', { path: '/', data: { p: rec(now - 3600000, { seconds: 900 }) } });
+  a.stream('/sessions/' + B).emit('put', { path: '/', data: { s: live } });
+  assert.equal(a.text('figToday'), '35 min');
+  assert.equal(a.text('figLevel'), 38);
+  assert.match(a.text('statusText'), /Speelt nu Sudoku · level 37/);
   a.advance(80000);
-  assert.ok(a.nodes.get('endings').children.some(row => row.children[0].textContent === 'Geen betrouwbare eindmelding'));
-  a.nodes.get('game').value = 'sudoku'; a.nodes.get('game').onchange();
-  assert.equal(a.nodes.get('observedRounds').textContent, 0);
-  assert.equal(a.nodes.get('todayTime').textContent, '0 sec');
+  assert.match(a.text('statusText'), /^Laatst gespeeld vandaag/);
 });
 
-test('empty Firebase action maps are optional; invalid detail counts cannot distort insights', () => {
-  const a = dashboard(), r = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: false };
-  a.streams[0].emit('put', { path: '/', data: {
-    noActionsYet: { ...r, detail: detail(r, { actions: undefined }) },
-    invalid: { ...r, detail: detail(r, { actions: { hint: 0.5 } }) },
-    invalidProgress: { ...r, detail: detail(r, { progress: 53 }) }
-  } });
-  assert.equal(a.nodes.get('observedRounds').textContent, 1);
-  assert.equal(a.nodes.get('sessions').children.length, 1);
-  assert.equal(a.nodes.get('actionCounts').children.length, 0);
+test('the game filter keeps the apps apart', () => {
+  const a = dashboard('#' + A);
+  const now = a.now;
+  a.stream('/sessions/' + A).emit('put', { path: '/', data: { p: rec(now, { seconds: 300 }), s: sudoku(now, { seconds: 600 }) } });
+  assert.equal(a.text('figToday'), '15 min');
+  const seg = a.nodes.get('gameSeg');
+  seg.listeners.click({ target: { dataset: { v: 'sudoku' } } });
+  assert.equal(a.text('figToday'), '10 min');
+  assert.match(a.context.location.search, /game=sudoku/);
 });
 
-
-test('an explicit all-games bookmark survives reload when a different game was remembered', () => {
-  const saved = new Map([['opa.dashboard.game', 'sudoku']]);
-  const a = dashboard('#' + 'a'.repeat(32), saved, '?game=all');
-  assert.equal(a.nodes.get('game').value, 'all');
-  const reloaded = dashboard(a.context.location.hash, saved, a.context.location.search);
-  assert.equal(reloaded.nodes.get('game').value, 'all');
+test('live updates, patches and removals; disconnects and hidden tabs', () => {
+  const a = dashboard('#' + A), s = a.stream('/sessions/' + A), now = a.now;
+  s.emit('put', { path: '/', data: { one: rec(now, { active: true, seconds: 60, start: now - 60000 }) } });
+  assert.match(a.text('statusText'), /Speelt nu Patience/);
+  s.emit('patch', { path: '/one', data: { seconds: 120 } });
+  assert.equal(a.text('figToday'), '2 min');
+  s.emit('put', { path: '/one', data: null });
+  assert.equal(a.text('figToday'), '0 min');
+  s.onerror();
+  assert.equal(a.text('statusText'), 'Geen verbinding met de database');
+  a.context.document.hidden = true; a.listeners.visibilitychange();
+  assert.ok(a.streams.every(x => x.closed));
+  a.context.document.hidden = false; a.listeners.visibilitychange();
+  assert.ok(a.stream('/sessions/' + A));
 });
 
-
-test('expanded session details stay open through live updates and clock refreshes', () => {
-  const a = dashboard(), r = { start: a.now - 60000, last: a.now, seconds: 60, games: 1, wins: 0, active: false };
-  const record = { ...r, detail: detail(r) };
-  a.streams[0].emit('put', { path: '/', data: { one: record } });
-  const expanded = a.nodes.get('sessions').children[0].children[5].children[0];
-  expanded.open = true; expanded.listeners.toggle();
-  a.advance(10000);
-  assert.equal(a.nodes.get('sessions').children[0].children[5].children[0].open, true);
-  a.streams[0].emit('patch', { path: '/one', data: { seconds: 61 } });
-  const refreshed = a.nodes.get('sessions').children[0].children[5].children[0];
-  assert.equal(refreshed.open, true);
-  refreshed.open = false; refreshed.listeners.toggle(); a.advance(10000);
-  assert.equal(a.nodes.get('sessions').children[0].children[5].children[0].open, false);
+test('renaming a device saves the name and joins it to the player with that name', async () => {
+  const a = dashboard('#' + B);
+  a.streams.find(s => s.url.endsWith('/players.json')).emit('put', { path: '/', data: { [A]: { device: 'iPhone', name: 'Opa' }, [B]: { device: 'iPhone' } } });
+  const form = a.nodes.get('devices').children[0];
+  const input = form.children.find(c => c.maxLength === 40);
+  input.value = 'Opa';
+  await form.onsubmit({ preventDefault() {} });
+  assert.equal(a.fetches[0].url, `https://example.firebasedatabase.app/players/${B}.json`);
+  assert.deepEqual(JSON.parse(a.fetches[0].options.body), { name: 'Opa' });
+  assert.ok(a.stream('/sessions/' + A) && a.stream('/sessions/' + B));
 });
 
-
-test('compact daily attempts retain interruptions and use measured hours without spreading pauses', () => {
+test('names from the database are shown as plain text, never as markup', () => {
   const a = dashboard();
-  // Both bursts occurred on Sunday: 1 minute at noon and 2 minutes at 19:00.
-  const start = Date.parse('2026-10-11T10:00:00Z'), last = Date.parse('2026-10-11T17:02:00Z');
-  const record = {start, last, seconds:180, games:1, wins:0, active:false, detail:{
-    v:2, round:'c'.repeat(32), reason:'hidden', ended:last, initial:0, progress:5,total:52,
-    lastAction:'hint',actionAt:last,lastProgressAt:last,maxGap:120, actions:{hint:2},
-    stops:{pause:4,hidden:1},hours:{h12:60,h19:120}
-  }};
-  a.streams[0].emit('put', {path:'/',data:{compact:record}});
-  assert.equal(a.nodes.get('weekTime').textContent, '3 min');
-  assert.equal(a.nodes.get('sessions').children.length, 1);
-  assert.equal(a.nodes.get('observedRounds').textContent, 1);
-  const hours = a.nodes.get('hours').children;
-  assert.equal(hours[12].children[2].textContent, '1 min');
-  assert.equal(hours[19].children[2].textContent, '2 min');
-  assert.equal(hours[15].children[2].textContent, '0 sec');
-  assert.match(a.nodes.get('preferredTimes').textContent, /19:00–20:00/);
-  const endings = a.nodes.get('endings').children.map(row => row.children.map(c=>c.textContent).join(' ')).join(' ');
-  assert.match(endings, /Pauze gekozen.*4×/); assert.match(endings, /App verborgen.*1×/);
-  const details=a.nodes.get('sessions').children[0].children[5].children[0];
-  assert.ok(details.children.some(c=>c.textContent.includes('Samengevoegd per poging per dag')));
+  a.streams[0].emit('put', { path: '/', data: { [A]: { device: 'iPhone', name: '<img src=x onerror=alert(1)>' } } });
+  assert.equal(a.text('who-name'), '<img src=x onerror=alert(1)>');
+  assert.equal(a.nodes.get('who').children[0].textContent.startsWith('<img'), true);
+  assert.ok(!a.nodes.get('devices').children.some(c => (c._html || '').includes('<img')));
 });
 
-test('compact counter maps are bounded and invalid maps do not distort the dashboard', () => {
-  const a = dashboard(), start = a.now-60000;
-  const record={start,last:a.now,seconds:60,games:1,wins:0,active:false,detail:{
-    v:2,round:'c'.repeat(32),reason:'pause',ended:a.now,initial:0,progress:0,total:52,
-    lastAction:'none',actionAt:0,lastProgressAt:start,maxGap:0
-  }};
-  a.streams[0].emit('put',{path:'/',data:{valid:record,
-    badHour:{...record,detail:{...record.detail,hours:{h24:10}}},
-    tooMuch:{...record,detail:{...record.detail,hours:{h12:61}}},
-    badStop:{...record,detail:{...record.detail,stops:{pause:0.5}}},
-    unknownStop:{...record,detail:{...record.detail,stops:{invented:1}}}
-  }});
-  assert.equal(a.nodes.get('sessions').children.length, 1);
-  assert.equal(a.nodes.get('weekTime').textContent,'1 min');
+test('a bookmarked device keeps working before the player list arrives', () => {
+  const a = dashboard('#' + C);
+  assert.ok(a.stream('/sessions/' + C));
+  assert.equal(a.context.location.hash, '#' + C);
 });
 
-test('history groups a day and merges resumed attempts while preserving expansion on refresh', () => {
-  const a = dashboard(), r = {start:a.now-60000,last:a.now,seconds:30,games:1,wins:0,active:false};
-  a.streams[0].emit('put',{path:'/',data:{one:{...r,detail:detail(r)},two:{...r,games:0,detail:detail(r)}}});
-  let day = a.nodes.get('history').children[0];
-  assert.equal(a.nodes.get('history').children.length,1);
-  assert.equal(day.children.length,2); // one heading, one grouped attempt
-  assert.match(day.children[1].children[1].textContent,/1 min actief/);
-  day.open=true; day.listeners.toggle(); a.advance(10000);
-  day=a.nodes.get('history').children[0]; assert.equal(day.open,true);
-  a.nodes.get('who').value='b'.repeat(32); a.nodes.get('who').onchange();
-  assert.match(a.nodes.get('history').children[0].textContent,/Nog geen/);
-});
-
-
-test('known players stay visible, unnamed devices are optional and bookmarked devices stay accessible', () => {
-  const a = dashboard(''), opa='a'.repeat(32), dennis='b'.repeat(32), other='c'.repeat(32);
-  a.streams[0].emit('put',{path:'/',data:{[opa]:{name:'Opa',device:'iPhone'},[dennis]:{name:'DennisTEST',device:'Computer'},[other]:{device:'iPhone'}}});
-  assert.equal(a.nodes.get('who').children.length,2);
-  assert.match(a.nodes.get('devicesToggle').textContent,/\(1\)/);
-  a.nodes.get('devicesToggle').onclick(); assert.equal(a.nodes.get('who').children.length,3);
-  a.nodes.get('who').value=other; a.nodes.get('who').onchange();
-  a.nodes.get('devicesToggle').onclick();
-  assert.equal(a.nodes.get('who').value,other); assert.equal(a.nodes.get('who').children.length,3);
+test('signals point out struggles without guessing reasons', () => {
+  const { api } = dashboard();
+  const now = Date.parse('2026-10-18T10:00:00Z');
+  const r = sudoku(now, { mistakes: 3 }); r.detail = detail(r, { stops: { lost: 2 } });
+  const all = api.sanitize({ r }, A, 'iPhone');
+  const s = api.summarize(all, 'all', 30, now);
+  const out = api.signals(s, all, now).map(x => x.text).join(' | ');
+  assert.match(out, /2 keer 3 fouten/);
+  assert.match(out, /Gespeeld op 1 dag/);
 });

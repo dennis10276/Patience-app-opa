@@ -1,367 +1,302 @@
+/* Opa's speeloverzicht – how opa is doing with Patience and Sudoku. Reads the shared Firebase database. */
 (() => {
 'use strict';
 const $ = id => document.getElementById(id);
-const zone = 'Europe/Amsterdam';
-const dayFormatter = new Intl.DateTimeFormat('sv-SE', { timeZone: zone });
-const timeFormatter = new Intl.DateTimeFormat('nl-NL', { timeZone: zone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-const dayKey = t => dayFormatter.format(t);
-const dateTime = t => timeFormatter.format(t);
-const duration = s => s < 60 ? `${Math.floor(s)} sec` : s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} u ${Math.floor(s % 3600 / 60)} min`;
-const levels = { easy: 'Makkelijk', medium: 'Gemiddeld', hard: 'Moeilijk', expert: 'Expert', master: 'Meester', extreme: 'Extreem' };
-const endings = { playing: 'Aan het spelen', won: 'Gewonnen / voltooid', lost: 'Foutenlimiet bereikt', stuck: 'Geen zetten meer gemeld', new_game: 'Nieuw spel gekozen', restart: 'Opnieuw begonnen', menu: 'Menu / startscherm geopend', pause: 'Pauze gekozen', hidden: 'App verborgen / scherm uit', closed: 'Pagina verlaten', idle: '2 minuten geen aanraking', suspended: 'Browser onderbroken', midnight: 'Daggrens (geen stop)', recovered: 'Hersteld na onderbreking', unknown: 'Geen betrouwbare eindmelding' };
-const actionNames = { move: 'Kaart verplaatst', draw: 'Stapel getrokken', recycle: 'Stapel omgedraaid', undo: 'Ongedaan', hint: 'Hint', blocked: 'Zet lukte niet', auto_finish: 'Automatisch uitgespeeld', input: 'Getal ingevuld', mistake: 'Fout getal gemeld', note: 'Notitie gewijzigd', erase: 'Gewist', second_chance: 'Tweede kans' };
-const hourFormatter = new Intl.DateTimeFormat('nl-NL', { timeZone: zone, hour: '2-digit', hourCycle: 'h23' });
-const weekdayFormatter = new Intl.DateTimeFormat('nl-NL', { timeZone: zone, weekday: 'short' });
-let periodDays = 30;
-const validGame = game => ['all', 'patience', 'sudoku'].includes(game);
-const params = new URLSearchParams(location.search || '');
-let game = params.get('game');
-if (!validGame(game)) { try { game = localStorage.getItem('opa.dashboard.game'); } catch (_) {} }
-if (!validGame(game)) game = 'all';
-$('game').value = game;
-const appOf = record => record.app || 'patience';
-function bookmark() {
-  const query = new URLSearchParams(location.search || '');
-  query.set('game', game);
-  const queryString = query.toString();
-  history.replaceState(null, '', location.pathname + (queryString ? '?' + queryString : '') + '#' + key);
-}
-const expandedSessions = new Set(), expandedDays = new Set();
-let records = [], cache = Object.create(null), stream = null, connected = false;
-let showAllDevices = false;
-let players = Object.create(null), directory = null, directoryLoaded = false;
-const validKey = key => /^[a-f0-9]{32}$/.test(key || '');
-let key = validKey(location.hash.slice(1)) ? location.hash.slice(1) : '';
-if (!key) { try { const saved = localStorage.getItem('patience.dashboard.player'); if (validKey(saved)) key = saved; } catch (_) {} }
 const base = String((window.PATIENCE_TRACKING || {}).databaseUrl || '').replace(/\/$/, '');
-function choose(next) {
-  if (!validKey(next)) return;
-  if (next !== key) {
-    if (stream) stream.close(); stream = null;
-    cache = Object.create(null); records = []; connected = false;
-  }
-  key = next;
-  bookmark();
-  try { localStorage.setItem('patience.dashboard.player', key); } catch (_) {}
-  $('who').value = key;
-  $('playerName').value = players[key]?.name || '';
-  $('nameStatus').textContent = '';
-  $('overview').hidden = false; $('naming').hidden = false;
-  render(); refresh();
-}
-function fillPicker() {
-  const all = Object.entries(players).filter(([id, p]) => validKey(id) && p && typeof p === 'object');
-  const named = p => typeof p.name === 'string' && p.name.trim();
-  const unnamed = all.filter(([,p]) => !named(p)), hasNamed = all.some(([,p]) => named(p));
-  const list = all.filter(([id,p]) => showAllDevices || named(p) || id === key || !hasNamed);
-  $('devicesToggle').hidden = !unnamed.length;
-  $('devicesToggle').textContent = showAllDevices ? 'Alleen bekende spelers' : `Andere apparaten tonen (${unnamed.length})`;
-  // Preserve old bookmarked links, including devices that have not received the update yet.
-  if (key && !list.some(([id]) => id === key)) list.push([key, {}]);
-  const label = (id, p) => `${typeof p.name === 'string' && p.name.trim() ? p.name.trim().slice(0, 40) : p.device || 'Apparaat'} · ${id.slice(0, 8)}`;
-  list.sort((a, b) => label(...a).localeCompare(label(...b), 'nl'));
-  $('who').replaceChildren();
-  for (const [id, p] of list) { const option = document.createElement('option'); option.value = id; option.textContent = label(id, p); $('who').appendChild(option); }
-  $('who').disabled = !list.length;
-  $('empty').hidden = !!list.length || !directoryLoaded;
-  if (!list.length) { const option = document.createElement('option'); option.textContent = 'Nog geen spelers'; $('who').appendChild(option); $('status').textContent = 'Nog geen spelers'; return; }
-  if (!key) choose((list.find(([, p]) => /^opa$/i.test(p.name || '')) || list[0])[0]);
-  else { $('who').value = key; $('overview').hidden = false; $('naming').hidden = false; refresh(); }
-}
-$('period').onchange = () => { if ([7, 30, 90].includes(Number($('period').value))) { periodDays = Number($('period').value); render(); } };
-$('who').onchange = () => choose($('who').value);
-$('devicesToggle').onclick = () => { showAllDevices = !showAllDevices; fillPicker(); };
-$('game').onchange = () => {
-  if (!validGame($('game').value)) return;
-  game = $('game').value;
-  try { localStorage.setItem('opa.dashboard.game', game); } catch (_) {}
-  if (key) bookmark();
-  render();
+const ZONE = 'Europe/Amsterdam';
+const DAY = 86400000, LIVE_MS = 75000;
+
+/* ================= formatting ================= */
+const dayFmt = new Intl.DateTimeFormat('sv-SE', { timeZone: ZONE });
+const timeFmt = new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, hour: '2-digit', minute: '2-digit' });
+const dateFmt = new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, weekday: 'long', day: 'numeric', month: 'long' });
+const shortDayFmt = new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, weekday: 'short', day: 'numeric' });
+const hourFmt = new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, hour: '2-digit', hourCycle: 'h23' });
+const weekdayFmt = new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, weekday: 'short' });
+const dayKey = t => dayFmt.format(t);
+const noon = d => Date.parse(`${d}T12:00:00Z`);
+const minutes = s => {
+  s = Math.max(0, Math.round(s));
+  if (s < 60) return s ? `${s} sec` : '0 min';
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  const m = Math.floor(s % 3600 / 60);
+  return `${Math.floor(s / 3600)} u${m ? ' ' + m + ' min' : ''}`;
 };
-addEventListener('hashchange', () => { const next = location.hash.slice(1); if (validKey(next)) { choose(next); fillPicker(); } });
-$('nameForm').onsubmit = async e => {
-  e.preventDefault();
-  const id = key, name = $('playerName').value.trim();
-  if (!validKey(id) || !name || name.length > 40) return;
-  $('saveName').disabled = true; $('nameStatus').textContent = 'Opslaan…';
-  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 10000);
-  try {
-    const response = await fetch(`${base}/players/${id}.json`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }), signal: controller.signal });
-    if (!response.ok) throw new Error('denied');
-    if (!players[id]) players[id] = {};
-    players[id].name = name; fillPicker();
-    if (key === id) $('nameStatus').textContent = 'Naam opgeslagen.';
-  } catch (_) { if (key === id) $('nameStatus').textContent = 'Naam niet opgeslagen. Probeer het opnieuw zodra er verbinding is.'; }
-  finally { clearTimeout(timeout); $('saveName').disabled = false; }
+const when = t => {
+  const d = dayKey(t), today = dayKey(Date.now()), yesterday = dayKey(Date.now() - DAY);
+  return (d === today ? 'vandaag' : d === yesterday ? 'gisteren' : dateFmt.format(t)) + ' om ' + timeFmt.format(t);
 };
-function render() {
-  const visible = records.filter(r => game === 'all' || appOf(r) === game);
-  const showSudoku = game !== 'patience';
-  $('gameSummary').textContent = game === 'sudoku' ? 'Sudoku' : game === 'patience' ? 'Patience' : 'Patience en Sudoku samen';
-  const now = Date.now(), today = dayKey(now);
-  const weekDays = Array.from({ length: 7 }, (_, i) => new Date(Date.parse(`${today}T12:00:00Z`) - i * 86400000).toISOString().slice(0, 10));
-  const totals = new Map(weekDays.map(d => [d, { seconds: 0, games: 0, wins: 0, hints: 0, mistakes: 0 }]));
-  visible.forEach(r => {
-    if (dayKey(r.last) < weekDays[6]) return;
-    // Split the measured time proportionally if a session spans a clock/date boundary.
-    const span = Math.max(1, r.last - r.start);
-    if (r.detail?.v === 2) {
-      const entry = totals.get(dayKey(r.start)); if (entry) entry.seconds += r.seconds;
-    } else for (let t = r.start; t < r.last;) {
-      const end = Math.min(r.last, (Math.floor(t / 60000) + 1) * 60000);
-      const d = dayKey(t), entry = totals.get(d);
-      if (entry) entry.seconds += r.seconds * (end - t) / span;
-      t = end;
-    }
-    const entry = totals.get(dayKey(r.start));
-    if (entry) entry.games += r.games;
-    // Completed puzzles and actions belong to the day of the session's last activity.
-    const endEntry = totals.get(dayKey(r.last));
-    if (endEntry) { endEntry.wins += r.wins; endEntry.hints += r.hints || 0; endEntry.mistakes += r.mistakes || 0; }
-  });
-  $('todayTime').textContent = duration(totals.get(today).seconds);
-  $('weekTime').textContent = duration([...totals.values()].reduce((n, d) => n + d.seconds, 0));
-  $('weekWins').textContent = [...totals.values()].reduce((n, d) => n + d.wins, 0);
-  const sudoku = visible.filter(r => appOf(r) === 'sudoku' && totals.has(dayKey(r.last)));
-  $('sudokuSummary').hidden = !showSudoku;
-  $('sudokuHints').textContent = sudoku.reduce((n, r) => n + r.hints, 0);
-  $('sudokuMistakes').textContent = sudoku.reduce((n, r) => n + r.mistakes, 0);
-  const gamesToday = totals.get(today).games;
-  $('todayGames').textContent = `${gamesToday} ${gamesToday === 1 ? 'spel' : 'spellen'}`;
-  const latest = visible.reduce((a, b) => !a || b.last > a.last ? b : a, null);
-  const active = connected ? visible.filter(r => r.active && now >= r.last && now - r.last < 75000) : [];
-  const live = !!active.length;
-  $('status').textContent = !key ? 'Nog geen spelers' : !connected ? 'Geen verbinding' : live ? (game === 'all' ? 'Nu aan het spelen' : `Speelt nu ${game === 'sudoku' ? 'Sudoku' : 'Patience'}`) : 'Nu niet actief';
-  $('status').classList.toggle('live', live);
-  $('lastPlayed').textContent = latest ? `${dateTime(latest.last)} · ${appOf(latest) === 'sudoku' ? 'Sudoku' : 'Patience'} · ${duration(latest.seconds)}` : 'Nog geen speelgegevens voor deze keuze. Nieuwe speelmomenten verschijnen automatisch zodra opa speelt.';
-  const max = Math.max(60, ...[...totals.values()].map(d => d.seconds));
-  $('days').replaceChildren();
-  [...weekDays].reverse().forEach(d => {
-    const row = document.createElement('div'); row.className = 'bar-row';
-    const label = document.createElement('span'); label.textContent = d.slice(8) + '-' + d.slice(5, 7);
-    const bar = document.createElement('div'); bar.className = 'bar';
-    const fill = document.createElement('i'); fill.style.width = `${totals.get(d).seconds / max * 100}%`; bar.appendChild(fill);
-    const time = document.createElement('span'); time.textContent = duration(totals.get(d).seconds);
-    row.append(label, bar, time); $('days').appendChild(row);
-  });
-  $('sessions').replaceChildren();
-  [...visible].sort((a, b) => b.start - a.start).slice(0, 40).forEach(r => {
-    const row = document.createElement('tr');
-    const isSudoku = appOf(r) === 'sudoku';
-    const d = r.detail;
-    const values = [dateTime(r.start), isSudoku ? 'Sudoku' : 'Patience', duration(r.seconds), ending(r, now), d ? `${Math.round(d.initial / Math.max(1, d.total) * 100)} → ${Math.round(d.progress / Math.max(1, d.total) * 100)}%` : 'Niet gemeten'];
-    values.forEach(value => { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
-    const detailCell = document.createElement('td');
-    if (d) {
-      const details = document.createElement('details'), summary = document.createElement('summary');
-      const expansionKey = key + ':' + r._id;
-      details.open = expandedSessions.has(expansionKey);
-      details.addEventListener('toggle', () => { if (details.open) expandedSessions.add(expansionKey); else expandedSessions.delete(expansionKey); });
-      summary.textContent = isSudoku ? `${levels[r.level]}${r.daily ? ' · dagelijks' : ''} · ${r.hints} hints · ${r.mistakes} fouten` : 'Bekijk spelacties'; details.appendChild(summary);
-      const add = text => { const line = document.createElement('p'); line.textContent = text; details.appendChild(line); };
-      add(`Begonnen: ${r.games} · Gewonnen / voltooid: ${r.wins} · Laatste activiteit: ${dateTime(r.last)} · Eindmelding: ${d.ended ? dateTime(d.ended) : 'nog geen eindmelding'}`);
-      if (d.v === 2) add('Samengevoegd per poging per dag. Onderbrekingen: ' + (Object.entries(d.stops || {}).filter(([k]) => k !== 'midnight').map(([k, n]) => `${endings[k]}: ${n}×`).join(' · ') || 'nog geen') + '.');
-      add(Object.entries(d.actions || {}).map(([k, n]) => `${actionNames[k]}: ${n}`).join(' · ') || 'Geen spelacties gemeten');
-      add(`Laatste spelactie: ${actionNames[d.lastAction] || 'Niet gemeten'}${d.actionAt ? ' om ' + dateTime(d.actionAt) : ''}. Langste tijd zonder spelactie: ${duration(d.maxGap)} (maximaal 2 min).`);
-      add(`Voortgang sinds ${dateTime(d.lastProgressAt)} niet verder toegenomen. Dit meet ${isSudoku ? 'goed ingevulde vakjes' : 'kaarten op de stapels boven'}, niet alle nuttige zetten.`);
-      add(`Voortgang: ${d.progress} van ${d.total} ${isSudoku ? 'in te vullen vakjes goed' : 'kaarten bovenop'}. Score: ${d.score == null ? '—' : d.score}. Spelklok: ${d.gameSeconds == null ? '—' : duration(d.gameSeconds)}.`);
-      if (isSudoku) add(`Fouten tonen: ${d.autoCheck ? 'aan' : 'uit'} · 3-foutenlimiet: ${d.mistakeLimit ? 'aan' : 'uit'}`);
-      else add(`Tik om te verplaatsen: ${d.tapMove ? 'aan' : 'uit'} · Automatisch uitspelen: ${d.autoFinish ? 'aan' : 'uit'}`);
-      add(`Appversie: ${d.build || 'onbekend'} · Poging: ${d.round.slice(0, 8)} (dezelfde code = verder gespeeld). Eindtijd is de tijd van de eindmelding; achtergrond of onderbreking vertelt niet waarom hij stopte.`);
-      detailCell.appendChild(details);
-    } else detailCell.textContent = `${isSudoku ? levels[r.level] + (r.daily ? ' · Dagelijks' : '') + ' · ' + r.hints + ' hints · ' + r.mistakes + ' fouten · ' : ''}Begonnen: ${r.games} · Voltooid: ${r.wins} · Laatste update: ${dateTime(r.last)}. Oude versie: geen uitgebreide spelacties.`;
-    row.appendChild(detailCell); $('sessions').appendChild(row);
-  });
-  renderInsights(visible, now);
-  renderHistory(visible, now);
-}
-function ending(r, now) {
-  if (!r.detail) return 'Niet gemeten (oude versie)';
-  const reason = r.detail.reason;
-  if (reason === 'playing' && (!r.active || now < r.last || now - r.last >= 75000)) return endings.unknown;
-  return endings[reason] || endings.unknown;
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/* ================= record validation =================
+   The database is writable by the apps without login, so every record is checked before it counts. */
+const ENDINGS = { playing: 'Aan het spelen', won: 'Uitgespeeld', lost: '3 fouten gemaakt', stuck: 'Geen zetten meer', new_game: 'Nieuw spel gekozen', restart: 'Opnieuw begonnen', menu: 'Naar het menu', pause: 'Pauze', hidden: 'App weggelegd', closed: 'App gesloten', idle: '2 minuten niets gedaan', suspended: 'Onderbroken', midnight: 'Middernacht', recovered: 'Later hervat', unknown: 'Onbekend' };
+const ACTIONS = { move: 'kaart verplaatst', draw: 'kaart getrokken', recycle: 'stapel omgedraaid', undo: 'ongedaan', hint: 'hint', blocked: 'zet lukte niet', auto_finish: 'automatisch uitgespeeld', input: 'getal ingevuld', mistake: 'fout getal', note: 'notitie', erase: 'gewist', second_chance: 'tweede kans' };
+const BANDS = ['easy', 'medium', 'hard', 'expert', 'master', 'extreme'];
+const isInt = (n, lo, hi) => Number.isInteger(n) && n >= lo && n <= hi;
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const validKey = k => /^[a-f0-9]{32}$/.test(k || '');
+function validCounts(map, allowed, max) {
+  return map === undefined || (!!map && typeof map === 'object' && !Array.isArray(map) && Object.entries(map).every(([k, n]) => allowed(k) && isInt(n, 0, max)));
 }
 function validDetail(d, r) {
-  if (!d || ![1, 2].includes(d.v) || !validKey(d.round) || !Object.prototype.hasOwnProperty.call(endings, d.reason)) return false;
-  if (!['progress', 'initial', 'total', 'maxGap', 'actionAt', 'lastProgressAt'].every(k => Number.isInteger(d[k]) && d[k] >= 0)) return false;
+  if (!d || typeof d !== 'object' || ![1, 2].includes(d.v) || !validKey(d.round) || !has(ENDINGS, d.reason)) return false;
+  if (!['progress', 'initial', 'total', 'maxGap', 'actionAt', 'lastProgressAt'].every(k => isInt(d[k], 0, Number.MAX_SAFE_INTEGER))) return false;
   if (d.total < 1 || d.total > 81 || d.progress > d.total || d.initial > d.total || d.maxGap > 120) return false;
-  if (d.lastProgressAt < r.start || d.lastProgressAt > r.last || d.actionAt !== 0 && (d.actionAt < r.start || d.actionAt > r.last)) return false;
+  if (d.lastProgressAt < r.start || d.lastProgressAt > r.last || (d.actionAt !== 0 && (d.actionAt < r.start || d.actionAt > r.last))) return false;
   if (d.ended !== undefined && (!Number.isInteger(d.ended) || d.ended < r.last)) return false;
-  if (d.reason !== 'playing' && d.ended === undefined || d.lastAction !== 'none' && !Object.prototype.hasOwnProperty.call(actionNames, d.lastAction)) return false;
+  if ((d.reason !== 'playing' && d.ended === undefined) || (d.lastAction !== 'none' && !has(ACTIONS, d.lastAction))) return false;
+  if (!validCounts(d.actions, k => has(ACTIONS, k), 10000)) return false;
   if (d.v === 2) {
-    for (const [field, allowed, max] of [
-      ['stops', k => k !== 'playing' && Object.prototype.hasOwnProperty.call(endings, k), 10000],
-      ['hours', k => /^h([01][0-9]|2[0-3])$/.test(k), 90000]
-    ]) if (d[field] !== undefined && (!d[field] || typeof d[field] !== 'object' || Array.isArray(d[field]) ||
-      !Object.entries(d[field]).every(([k, n]) => allowed(k) && Number.isInteger(n) && n >= 1 && n <= max))) return false;
-    if (Object.values(d.hours || {}).reduce((sum, n) => sum + n, 0) > r.seconds) return false;
+    if (!validCounts(d.stops, k => k !== 'playing' && has(ENDINGS, k), 10000)) return false;
+    if (!validCounts(d.hours, k => /^h([01][0-9]|2[0-3])$/.test(k), 90000)) return false;
+    if (Object.values(d.hours || {}).reduce((a, b) => a + b, 0) > r.seconds) return false;
   }
-  return d.actions === undefined || d.actions && typeof d.actions === 'object' && !Array.isArray(d.actions) && Object.entries(d.actions).every(([k, n]) => Object.prototype.hasOwnProperty.call(actionNames, k) && Number.isInteger(n) && n >= 0 && n <= 10000);
+  return true;
 }
-function bars(id, entries, formatter = duration) {
-  const parent = $(id); parent.replaceChildren();
-  const max = Math.max(1, ...entries.map(([, n]) => n));
-  for (const [label, n] of entries) {
-    const row = document.createElement('div'), name = document.createElement('span'), bar = document.createElement('div'), fill = document.createElement('i'), value = document.createElement('span');
-    row.className = 'bar-row'; name.textContent = label; bar.className = 'bar'; fill.style.width = `${n / max * 100}%`; value.textContent = formatter(n);
-    bar.appendChild(fill); row.append(name, bar, value); parent.appendChild(row);
+// "L37|38" = playing level 37, unlocked up to 38; "D|38" daily challenge; "O|38" old puzzle.
+function parseLevel(mode) {
+  const m = typeof mode === 'string' && /^(?:L(\d{1,5})|D|O)\|(\d{1,5})$/.exec(mode);
+  if (!m) return null;
+  const reached = Number(m[2]), played = m[1] ? Number(m[1]) : null;
+  if (reached < 1 || reached > 100000 || (played !== null && (played < 1 || played > reached))) return null;
+  return { played, reached, daily: mode[0] === 'D' };
+}
+function sanitize(raw, key, device) {
+  const out = [];
+  for (const [id, r] of Object.entries(raw || {})) {
+    if (!r || typeof r !== 'object') continue;
+    if (!['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k]))) continue;
+    if (r.start < 1577836800000 || r.last < r.start || r.last - r.start > 90000000) continue;
+    if (!isInt(r.seconds, 0, 90000) || !isInt(r.games, 0, 1000) || !isInt(r.wins, 0, 1000) || typeof r.active !== 'boolean') continue;
+    if (r.app !== undefined && r.app !== 'sudoku') continue;
+    const app = r.app || 'patience';
+    if (app === 'sudoku' && (!BANDS.includes(r.level) || typeof r.daily !== 'boolean' || !isInt(r.hints, 0, 1000) || !isInt(r.mistakes, 0, 1000))) continue;
+    if (r.detail !== undefined && !validDetail(r.detail, r)) continue;
+    const detail = r.detail ? { ...r.detail, actions: r.detail.actions || {} } : null;
+    out.push({
+      id, key, device, app, start: r.start, last: r.last, seconds: r.seconds, games: r.games, wins: r.wins, active: r.active,
+      hints: app === 'sudoku' ? r.hints : (detail?.actions.hint || 0),
+      mistakes: app === 'sudoku' ? r.mistakes : 0,
+      daily: app === 'sudoku' && r.daily,
+      level: app === 'sudoku' ? parseLevel(detail?.mode) : null,
+      cards: app === 'patience' && detail?.mode ? (detail.mode.endsWith('3') ? 3 : 1) : null,
+      detail,
+    });
   }
+  return out;
 }
-function renderInsights(visible, now) {
-  const cutoff = now - periodDays * 86400000;
-  const selected = visible.filter(r => r.last >= cutoff);
-  const measured = selected.filter(r => r.detail), actual = measured.filter(r => r.detail.v === 2 || r.detail.reason !== 'midnight');
-  $('coverage').textContent = `${selected.length} ${selected.length === 1 ? 'meetrecord' : 'meetrecords'} in ${periodDays} dagen; ${measured.length} met uitgebreide metingen. Hervattingen staan bij dezelfde poging; de geschiedenis hieronder is per dag gegroepeerd. Oude gegevens blijven beschikbaar.`;
-  const lengths = actual.map(r => r.seconds).sort((a, b) => a - b);
-  const median = lengths.length ? (lengths[Math.floor((lengths.length - 1) / 2)] + lengths[Math.floor(lengths.length / 2)]) / 2 : 0;
-  $('typicalTime').textContent = lengths.length ? duration(median) : 'Nog geen metingen';
-  $('measuredSessions').textContent = actual.length;
-  const rounds = new Map();
-  for (const r of measured) { const group = rounds.get(r.detail.round) || []; group.push(r); rounds.set(r.detail.round, group); }
-  $('observedRounds').textContent = rounds.size;
-  $('observedCompleted').textContent = [...rounds.values()].filter(list => list.some(r => r.wins > 0)).length;
-  const hours = Array(24).fill(0), weekdays = new Map(['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map(d => [d, 0]));
-  const heat = Object.fromEntries([...weekdays.keys()].map(d => [d, Array(24).fill(0)]));
-  for (const r of selected) {
+
+/* ================= people: devices with the same name are one person =================
+   On an iPhone every app on the home screen has its own storage, so Patience and Sudoku each get
+   their own device code. Giving both the same name in the dashboard makes them one player. */
+const norm = s => typeof s === 'string' ? s.trim().replace(/\s+/g, ' ').toLowerCase() : '';
+function people(players) {
+  const groups = new Map();
+  for (const [id, p] of Object.entries(players)) {
+    if (!validKey(id) || !p || typeof p !== 'object') continue;
+    const name = typeof p.name === 'string' ? p.name.trim().slice(0, 40) : '';
+    const gid = name ? 'n:' + norm(name) : 'k:' + id;
+    if (!groups.has(gid)) groups.set(gid, { gid, names: [], keys: [], devices: [] });
+    const g = groups.get(gid);
+    g.keys.push(id); if (name) g.names.push(name);
+    g.devices.push({ id, name, device: ['iPhone', 'iPad', 'Android', 'Computer'].includes(p.device) ? p.device : 'Apparaat' });
+  }
+  for (const g of groups.values()) {
+    // show the spelling most devices use, preferring a capital first letter ("Opa" over "OPa")
+    const count = new Map(); g.names.forEach(n => count.set(n, (count.get(n) || 0) + 1));
+    const score = n => count.get(n) * 10 + (/^[A-ZÀ-Ý][a-zà-ÿ]/.test(n) ? 1 : 0);
+    g.name = g.names.length ? [...count.keys()].sort((a, b) => score(b) - score(a) || a.localeCompare(b, 'nl'))[0] : '';
+    g.label = g.name || `${g.devices[0].device} ${g.keys[0].slice(0, 4)}`;
+    g.keys.sort();
+  }
+  return groups;
+}
+
+/* ================= calculations ================= */
+const appFilter = (records, game) => game === 'all' ? records : records.filter(r => r.app === game);
+function daysBack(n, now) {
+  const today = dayKey(now);
+  return Array.from({ length: n }, (_, i) => dayKey(noon(today) - (n - 1 - i) * DAY));
+}
+// active seconds per day and app; compact records (v2) belong to their start day, old ones are spread
+function secondsByDay(records) {
+  const map = new Map();
+  const add = (d, app, s) => { if (!map.has(d)) map.set(d, { patience: 0, sudoku: 0 }); map.get(d)[app] += s; };
+  for (const r of records) {
+    if (r.detail?.v === 2 || r.last === r.start) { add(dayKey(r.start), r.app, r.seconds); continue; }
+    const span = r.last - r.start;
+    for (let t = r.start; t < r.last;) {
+      const end = Math.min(r.last, (Math.floor(t / 60000) + 1) * 60000);
+      add(dayKey(t), r.app, r.seconds * (end - t) / span); t = end;
+    }
+  }
+  return map;
+}
+function summarize(all, game, periodDays, now) {
+  const records = appFilter(all, game);
+  const days = daysBack(periodDays, now), week = daysBack(7, now), weekStart = week[0], today = week[6];
+  const perDay = secondsByDay(records);
+  const sumDays = list => list.reduce((n, d) => n + ((perDay.get(d)?.patience || 0) + (perDay.get(d)?.sudoku || 0)), 0);
+  const inWeek = r => dayKey(r.last) >= weekStart;
+  const live = records.filter(r => r.active && now >= r.last && now - r.last < LIVE_MS).sort((a, b) => b.last - a.last)[0] || null;
+  const latest = records.reduce((a, b) => !a || b.last > a.last ? b : a, null);
+  // Sudoku level: the highest unlocked level any record reports
+  const sud = all.filter(r => r.app === 'sudoku');
+  const withLevel = sud.filter(r => r.level);
+  const level = withLevel.length ? Math.max(...withLevel.map(r => r.level.reached)) : null;
+  const before = withLevel.filter(r => dayKey(r.last) < weekStart);
+  const levelWeekAgo = before.length ? Math.max(...before.map(r => r.level.reached)) : null;
+  const firstThisWeek = withLevel.filter(inWeek).sort((a, b) => a.last - b.last)[0];
+  const levelGain = level == null ? null : level - (levelWeekAgo ?? (firstThisWeek ? firstThisWeek.level.reached - firstThisWeek.wins : level));
+  const levelByDay = new Map();
+  for (const r of withLevel) { const d = dayKey(r.last); levelByDay.set(d, Math.max(levelByDay.get(d) || 0, r.level.reached)); }
+  const game7 = app => {
+    const list = all.filter(r => r.app === app && inWeek(r));
+    return { seconds: week.reduce((n, d) => n + (perDayAll.get(d)?.[app] || 0), 0), wins: list.reduce((n, r) => n + r.wins, 0), games: list.reduce((n, r) => n + r.games, 0), hints: list.reduce((n, r) => n + r.hints, 0), mistakes: list.reduce((n, r) => n + r.mistakes, 0), lost: list.reduce((n, r) => n + (r.detail?.v === 2 ? r.detail.stops?.lost || 0 : r.detail?.reason === 'lost' ? 1 : 0), 0), any: all.some(r => r.app === app) };
+  };
+  const perDayAll = secondsByDay(all);
+  // when does he play: measured hourly counters, otherwise spread over the session
+  const cutoff = noon(days[0]) - DAY / 2;
+  const heat = Object.fromEntries(['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map(d => [d, Array(24).fill(0)]));
+  for (const r of records) {
+    if (r.last < cutoff) continue;
     if (r.detail?.v === 2) {
-      const weekday = weekdayFormatter.format(r.start).replace('.', '');
-      if (weekdays.has(weekday)) weekdays.set(weekday, weekdays.get(weekday) + r.seconds);
-      for (const [h, seconds] of Object.entries(r.detail.hours || {})) {
-        const hour = Number(h.slice(1)); hours[hour] += seconds;
-        if (heat[weekday]) heat[weekday][hour] += seconds;
-      }
+      const wd = weekdayFmt.format(r.start).replace('.', '');
+      for (const [h, s] of Object.entries(r.detail.hours || {})) if (heat[wd]) heat[wd][Number(h.slice(1))] += s;
       continue;
     }
     const span = Math.max(1, r.last - r.start);
-    // Allocate measured play proportionally; the summary does not contain an event timeline.
     for (let t = Math.max(r.start, cutoff); t < r.last;) {
-      const end = Math.min(r.last, (Math.floor(t / 3600000) + 1) * 3600000), seconds = r.seconds * (end - t) / span;
-      const hour = Number(hourFormatter.format(t)) % 24;
-      hours[hour] += seconds;
-      const weekday = weekdayFormatter.format(t).replace('.', '');
-      if (weekdays.has(weekday)) { weekdays.set(weekday, weekdays.get(weekday) + seconds); heat[weekday][hour] += seconds; }
+      const end = Math.min(r.last, (Math.floor(t / 3600000) + 1) * 3600000);
+      const wd = weekdayFmt.format(t).replace('.', ''), h = Number(hourFmt.format(t)) % 24;
+      if (heat[wd]) heat[wd][h] += r.seconds * (end - t) / span;
       t = end;
     }
   }
-  const peakHour = hours.indexOf(Math.max(...hours)), peakDay = [...weekdays].sort((a, b) => b[1] - a[1])[0];
-  $('preferredTimes').textContent = hours.some(n => n > 0) ? `Meeste gemeten speeltijd: ${String(peakHour).padStart(2, '0')}:00–${String((peakHour + 1) % 24).padStart(2, '0')}:00; weekdag: ${peakDay[0]}. Bekijk de verdeling hieronder; bij gelijke waarden wordt één piek getoond.` : 'Nog geen speeltijd om uren of weekdagen te vergelijken.';
-  bars('hours', hours.map((n, h) => [`${String(h).padStart(2, '0')}:00`, n]));
-  bars('weekdays', [...weekdays]);
-  renderHeatmap(heat);
-  const counts = new Map();
-  for (const r of actual) {
-    if (r.detail.v === 2) {
-      for (const [reason, n] of Object.entries(r.detail.stops || {})) {
-        if (reason === 'midnight') continue;
-        const label = endings[reason]; counts.set(label, (counts.get(label) || 0) + n);
-      }
-      if (r.detail.reason === 'playing' && ending(r, now) === endings.unknown) counts.set(endings.unknown, (counts.get(endings.unknown) || 0) + 1);
-    } else { const label = ending(r, now); counts.set(label, (counts.get(label) || 0) + 1); }
-  }
-  bars('endings', [...counts].sort((a, b) => b[1] - a[1]), n => `${n}×`);
-  $('endingEmpty').hidden = !!actual.length;
-  const actions = {};
-  for (const r of measured) for (const [k, n] of Object.entries(r.detail.actions)) actions[k] = (actions[k] || 0) + n;
-  bars('actionCounts', Object.entries(actions).map(([k, n]) => [actionNames[k], n]).sort((a, b) => b[1] - a[1]), n => `${n}×`);
-  const groups = new Map();
-  for (const list of rounds.values()) {
-    const r = list[0], mode = r.app === 'sudoku' ? `Sudoku · ${levels[r.level]}${r.daily ? ' · dagelijks' : ''}` : `Patience · ${r.detail.mode?.startsWith('vegas') ? 'Vegas ' : ''}${r.detail.mode?.endsWith('3') ? '3 kaarten' : '1 kaart'}`;
-    const group = groups.get(mode) || { attempts: 0, completed: 0, hints: 0, errors: 0 };
-    group.attempts++; if (list.some(x => x.wins > 0)) group.completed++;
-    group.hints += list.reduce((n, x) => n + (x.detail.actions.hint || 0), 0);
-    group.errors += list.reduce((n, x) => n + (x.detail.actions.mistake || 0) + (x.detail.actions.blocked || 0), 0);
-    groups.set(mode, group);
-  }
-  $('modes').replaceChildren();
-  for (const [mode, g] of groups) {
-    const row = document.createElement('tr');
-    for (const value of [mode, g.attempts, g.completed, g.hints, g.errors]) { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); }
-    $('modes').appendChild(row);
-  }
-  $('signals').replaceChildren();
-  const signal = text => { const p = document.createElement('p'); p.textContent = text; $('signals').appendChild(p); };
-  const stopCount = reason => actual.reduce((n, r) => n + (r.detail.v === 2 ? r.detail.stops?.[reason] || 0 : Number(r.detail.reason === reason)), 0);
-  const lost = stopCount('lost'), stuck = stopCount('stuck');
-  if (actions.blocked) signal(`${actions.blocked} kaartacties leverden geen zet op. Dit kan een ongeldige zet of een lastig aanraakdoel zijn. Bekijk de laatste actie en voortgang voordat je de bediening aanpast.`);
-  if (lost) signal(`${lost} ${lost === 1 ? 'speelblok eindigde' : 'speelblokken eindigden'} bij de foutenlimiet. Vergelijk Sudoku-niveaus en de 3-fouteninstelling om te zien waar extra uitleg of een mildere limiet kan helpen.`);
-  if (stuck) signal(`${stuck} ${stuck === 1 ? 'speelblok eindigde' : 'speelblokken eindigden'} met de melding Geen zetten meer. Controleer of de opties Nieuw spel, Opnieuw en Terug duidelijk genoeg zijn.`);
-  const afterHelp = actual.filter(r => !['won', 'midnight', 'playing'].includes(r.detail.reason) && ['hint', 'mistake', 'blocked'].includes(r.detail.lastAction) && r.last - r.detail.actionAt <= 30000).length;
-  if (afterHelp) signal(`${afterHelp} ${afterHelp === 1 ? 'blok eindigde' : 'blokken eindigden'} binnen 30 seconden na een hint, foutmelding of mislukte zet. Dit is een samenloop, geen bewezen reden om te stoppen; open de speldetails om het te bekijken.`);
-  if (actions.hint) signal(`${actions.hint} hints gebruikt in de gemeten blokken. Vergelijk hints per niveau en voortgang om te beoordelen waar de uitleg nuttiger kan.`);
-  if (!measured.length) signal('Nieuwe spelinformatie verschijnt automatisch na het spelen met de bijgewerkte apps. Persoonlijke redenen zoals moe of geen tijd kunnen de apps niet vaststellen.');
-  else signal('Menu, pauze, scherm uit en inactiviteit zijn waargenomen appgebeurtenissen. Ze bewijzen geen frustratie, verveling of andere persoonlijke reden. Open pogingen kunnen later nog worden voltooid; de tabel is geen definitief winstpercentage.');
+  return {
+    days, week, perDay, live, latest,
+    today: sumDays([today]), weekTotal: sumDays(week), periodTotal: sumDays(days),
+    level, levelGain, levelByDay,
+    sudoku: game7('sudoku'), patience: game7('patience'),
+    heat, history: buildHistory(records, days[0]),
+  };
 }
-function renderHeatmap(heat) {
-  const parent = $('heatmap'); parent.replaceChildren();
-  const max = Math.max(1, ...Object.values(heat).flat());
-  const corner = document.createElement('span'); parent.appendChild(corner);
-  for (let h = 0; h < 24; h++) {
-    const label = document.createElement('span'); label.textContent = h % 3 === 0 ? String(h).padStart(2, '0') : '';
-    parent.appendChild(label);
+// one entry per attempt (resumes share a round code), grouped per day, newest first
+function buildHistory(records, fromDay) {
+  const attempts = new Map();
+  for (const r of records) {
+    if (dayKey(r.last) < fromDay) continue;
+    const id = r.app + ':' + dayKey(r.start) + ':' + (r.detail?.round || r.key + r.id);
+    if (!attempts.has(id)) attempts.set(id, []);
+    attempts.get(id).push(r);
   }
-  for (const [day, values] of Object.entries(heat)) {
-    const label = document.createElement('span'); label.textContent = day; parent.appendChild(label);
-    values.forEach((seconds, h) => {
-      const cell = document.createElement('span');
-      cell.className = 'heat-cell heat-' + (seconds > 0 ? Math.min(5, 1 + Math.floor(seconds / max * 4)) : 0);
-      cell.title = `${day} ${String(h).padStart(2, '0')}:00–${String((h + 1) % 24).padStart(2, '0')}:00 · ${duration(seconds)}`;
-      cell.setAttribute?.('aria-label', cell.title);
-      parent.appendChild(cell);
-    });
-  }
-}
-function renderHistory(visible, now) {
-  const parent = $('history'); parent.replaceChildren();
-  const cutoff = now - periodDays * 86400000, days = new Map();
-  for (const r of visible.filter(r => r.last >= cutoff).sort((a, b) => b.last - a.last)) {
-    const day = dayKey(r.start);
-    if (!days.has(day)) days.set(day, []);
-    days.get(day).push(r);
-  }
-  if (!days.size) { const empty = document.createElement('p'); empty.className = 'note'; empty.textContent = 'Nog geen speelmomenten in deze periode.'; parent.appendChild(empty); return; }
-  for (const [day, list] of [...days].sort((a, b) => b[0].localeCompare(a[0]))) {
-    const details = document.createElement('details'), summary = document.createElement('summary');
-    const expansionKey = key + ':' + day;
-    details.className = 'history-day'; details.open = expandedDays.has(expansionKey);
-    details.addEventListener('toggle', () => { if (details.open) expandedDays.add(expansionKey); else expandedDays.delete(expansionKey); });
-    const title = document.createElement('strong'), stats = document.createElement('span');
-    title.textContent = new Intl.DateTimeFormat('nl-NL', {timeZone: zone, weekday:'short',day:'numeric',month:'short'}).format(Date.parse(day + 'T12:00:00Z'));
-    stats.textContent = `${duration(list.reduce((n,r) => n+r.seconds,0))} actief · ${list.reduce((n,r)=>n+r.games,0)} begonnen · ${list.reduce((n,r)=>n+r.wins,0)} voltooid`;
-    summary.append(title, stats); details.appendChild(summary);
-    const attempts = new Map();
+  const days = new Map();
+  for (const list of attempts.values()) {
+    list.sort((a, b) => a.start - b.start);
+    const first = list[0], last = list.reduce((a, b) => b.last > a.last ? b : a);
+    const actions = {}, stops = {};
     for (const r of list) {
-      const id = appOf(r) + ':' + (r.detail?.round || r._id);
-      if (!attempts.has(id)) attempts.set(id, []);
-      attempts.get(id).push(r);
+      for (const [k, n] of Object.entries(r.detail?.actions || {})) actions[k] = (actions[k] || 0) + n;
+      if (r.detail?.v === 2) for (const [k, n] of Object.entries(r.detail.stops || {})) { if (k !== 'midnight') stops[k] = (stops[k] || 0) + n; }
+      else if (r.detail && !['playing', 'midnight'].includes(r.detail.reason)) stops[r.detail.reason] = (stops[r.detail.reason] || 0) + 1;
     }
-    for (const attempt of attempts.values()) {
-      const latest = attempt[0], earliest = attempt.reduce((a,b) => a.start < b.start ? a : b), card = document.createElement('article');
-      card.className = 'attempt';
-      const heading = document.createElement('h3'), time = document.createElement('p'), status = document.createElement('p'), actions = document.createElement('p');
-      const d = latest.detail, isSudoku = appOf(latest) === 'sudoku';
-      heading.textContent = isSudoku ? `Sudoku · ${levels[latest.level]}${latest.daily ? ' · dagelijks' : ''}` : `Patience${d?.mode ? ' · ' + (d.mode.endsWith('3') ? '3 kaarten' : '1 kaart') + (d.mode.startsWith('vegas') ? ' · Vegas' : '') : ''}`;
-      time.className = 'note'; time.textContent = `${dateTime(earliest.start)} → ${dateTime(latest.last)} · ${duration(attempt.reduce((n,r)=>n+r.seconds,0))} actief`;
-      status.textContent = ending(latest, now) + (d ? ` · voortgang ${Math.round((earliest.detail?.initial || 0) / d.total * 100)} → ${Math.round(d.progress / d.total * 100)}%` : ' · extra metingen ontbreken');
-      const counts = {}, stops = {};
-      for (const r of attempt) {
-        for (const [k,n] of Object.entries(r.detail?.actions || {})) counts[k] = (counts[k] || 0) + n;
-        if (r.detail?.v === 2) { for (const [k,n] of Object.entries(r.detail.stops || {})) stops[k] = (stops[k] || 0) + n; }
-        else if (r.detail && !['playing','midnight'].includes(r.detail.reason)) stops[r.detail.reason] = (stops[r.detail.reason] || 0) + 1;
-      }
-      actions.className = 'note'; actions.textContent = Object.entries(counts).map(([k,n])=>`${actionNames[k]} ${n}×`).join(' · ') || 'Geen uitgebreide spelacties beschikbaar';
-      card.append(heading,time,status,actions);
-      if (Object.keys(stops).length) { const pause = document.createElement('p'); pause.className='note'; pause.textContent=Object.entries(stops).filter(([k])=>k!=='midnight').map(([k,n])=>`${endings[k]} ${n}×`).join(' · '); card.appendChild(pause); }
-      if (!d) { const legacy = document.createElement('p'); legacy.className='note'; legacy.textContent='Oud meetrecord: zonder pogingcode kunnen we niet bepalen of dit hetzelfde spel was.'; card.appendChild(legacy); }
-      details.appendChild(card);
-    }
-    parent.appendChild(details);
+    const a = {
+      app: first.app, start: first.start, last: last.last, seconds: list.reduce((n, r) => n + r.seconds, 0),
+      won: list.some(r => r.wins > 0), hints: list.reduce((n, r) => n + r.hints, 0), mistakes: list.reduce((n, r) => n + r.mistakes, 0),
+      level: list.map(r => r.level).filter(Boolean).pop() || null, daily: first.daily, cards: first.cards,
+      progress: last.detail ? Math.round(last.detail.progress / last.detail.total * 100) : null,
+      reason: last.detail?.reason || null, active: last.active, last_r: last, actions, stops, measured: !!last.detail,
+    };
+    const d = dayKey(a.start);
+    if (!days.has(d)) days.set(d, []);
+    days.get(d).push(a);
+  }
+  return [...days].sort((a, b) => b[0].localeCompare(a[0])).map(([day, list]) => ({ day, list: list.sort((a, b) => b.start - a.start) }));
+}
+function signals(s, all, now) {
+  const out = [];
+  const week = all.filter(r => dayKey(r.last) >= s.week[0]);
+  if (!week.length) { out.push({ tone: 'calm', text: 'Afgelopen week niet gespeeld.' }); return out; }
+  if (s.sudoku.lost) out.push({ tone: 'warn', text: `${plural(s.sudoku.lost, 'keer', 'keer')} 3 fouten gemaakt bij Sudoku deze week. Met de tweede kans of de instelling "Maximaal 3 fouten" uit kan het rustiger.` });
+  const hintShare = s.sudoku.wins ? s.sudoku.hints / s.sudoku.wins : 0;
+  if (s.sudoku.hints >= 10 && hintShare >= 5) out.push({ tone: 'warn', text: `Veel hints bij Sudoku: gemiddeld ${Math.round(hintShare)} per opgeloste puzzel. De puzzels zijn misschien net te lastig.` });
+  const stuck = week.reduce((n, r) => n + (r.detail?.v === 2 ? r.detail.stops?.stuck || 0 : r.detail?.reason === 'stuck' ? 1 : 0), 0);
+  if (stuck) out.push({ tone: 'warn', text: `${plural(stuck, 'Patience-spel liep', 'Patience-spellen liepen')} vast (geen zetten meer).` });
+  const blocked = week.reduce((n, r) => n + (r.detail?.actions.blocked || 0), 0);
+  if (blocked >= 20) out.push({ tone: 'warn', text: `${blocked} keer lukte een kaartzet niet. Misschien zijn de kaarten lastig te raken.` });
+  if (s.levelGain > 0) out.push({ tone: 'good', text: `${plural(s.levelGain, 'Sudoku-level', 'Sudoku-levels')} verder gekomen deze week.` });
+  const wins = s.sudoku.wins + s.patience.wins;
+  if (wins) out.push({ tone: 'good', text: `${plural(wins, 'spel', 'spellen')} uitgespeeld deze week.` });
+  const playDays = s.week.filter(d => (s.perDay.get(d)?.patience || 0) + (s.perDay.get(d)?.sudoku || 0) > 0).length;
+  out.push({ tone: 'calm', text: `Gespeeld op ${plural(playDays, 'dag', 'dagen')} van de afgelopen 7.` });
+  return out;
+}
+
+/* ================= state ================= */
+const S = {
+  players: {}, groups: new Map(), gid: null, keys: [], streams: new Map(), caches: new Map(), connected: new Set(),
+  game: 'all', period: 30, directory: null, loaded: false, dayState: new Map(), openAttempts: new Set(),
+};
+const params = new URLSearchParams(location.search || '');
+const remember = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
+const recall = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+S.game = ['all', 'patience', 'sudoku'].includes(params.get('game')) ? params.get('game') : ['all', 'patience', 'sudoku'].includes(recall('opa.dashboard.game')) ? recall('opa.dashboard.game') : 'all';
+S.period = [7, 30, 90].includes(Number(recall('opa.dashboard.period'))) ? Number(recall('opa.dashboard.period')) : 30;
+let wanted = validKey(location.hash.slice(1)) ? location.hash.slice(1) : validKey(recall('patience.dashboard.player')) ? recall('patience.dashboard.player') : '';
+
+function bookmark() {
+  const q = new URLSearchParams(location.search || '');
+  q.set('game', S.game);
+  history.replaceState(null, '', location.pathname + '?' + q.toString() + (S.keys[0] ? '#' + (wanted && S.keys.includes(wanted) ? wanted : S.keys[0]) : ''));
+}
+function groupOf(key) { for (const g of S.groups.values()) if (g.keys.includes(key)) return g; return null; }
+function select(gid) {
+  const g = S.groups.get(gid); if (!g) return;
+  const sameGroup = S.gid === gid;
+  S.gid = gid;
+  if (!g.keys.includes(wanted)) wanted = g.keys[0];
+  remember('patience.dashboard.player', wanted);
+  // keep streams for keys that stay, open new ones, close the rest
+  for (const [k, s] of S.streams) if (!g.keys.includes(k)) { s.close(); S.streams.delete(k); S.caches.delete(k); S.connected.delete(k); }
+  S.keys = g.keys.slice();
+  if (!sameGroup) { S.dayState.clear(); S.openAttempts.clear(); }
+  bookmark(); open(); render();
+}
+// before the player list arrives a bookmarked code still works on its own
+function selectKey(key) {
+  const g = groupOf(key);
+  if (g) { wanted = key; select(g.gid); return; }
+  S.gid = 'k:' + key; S.keys = [key]; wanted = key;
+  S.groups.set(S.gid, { gid: S.gid, keys: [key], names: [], name: '', label: 'Apparaat ' + key.slice(0, 4), devices: [{ id: key, name: '', device: 'Apparaat' }] });
+  bookmark(); open(); render();
+}
+function open() {
+  if (document.hidden || !base) return;
+  for (const key of S.keys) {
+    if (S.streams.has(key)) continue;
+    const q = new URLSearchParams({ orderBy: '"start"', startAt: String(Date.now() - 90 * DAY) });
+    const src = new EventSource(`${base}/sessions/${key}.json?${q}`);
+    S.streams.set(key, src);
+    const handle = patch => ev => {
+      if (S.streams.get(key) !== src) return;
+      try { S.caches.set(key, apply(S.caches.get(key) || Object.create(null), ev, patch)); S.connected.add(key); $('notice').hidden = true; render(); }
+      catch (_) { note('Een update kon niet worden gelezen.'); }
+    };
+    src.addEventListener('put', handle(false));
+    src.addEventListener('patch', handle(true));
+    src.onerror = () => { if (S.streams.get(key) !== src) return; S.connected.delete(key); render(); };
+    const denied = () => { if (S.streams.get(key) !== src) return; src.close(); S.streams.delete(key); S.connected.delete(key); note('De database staat dit overzicht niet toe. Controleer de Firebase-regels.'); render(); };
+    src.addEventListener('cancel', denied); src.addEventListener('auth_revoked', denied);
   }
 }
+function closeAll() { for (const s of S.streams.values()) s.close(); S.streams.clear(); S.connected.clear(); if (S.directory) S.directory.close(); S.directory = null; }
+function note(text) { $('notice').textContent = text; $('notice').hidden = false; }
 function put(target, path, data) {
   const parts = path.split('/').filter(Boolean);
   if (!parts.length) return Object.assign(Object.create(null), data || {});
-  const [id, field] = parts;
   if (parts.length > 2 || parts.some(p => ['__proto__', 'constructor', 'prototype'].includes(p))) return target;
+  const [id, field] = parts;
   if (!field) { if (data === null) delete target[id]; else target[id] = data; }
   else {
     if (!target[id] || typeof target[id] !== 'object') target[id] = Object.create(null);
@@ -369,59 +304,286 @@ function put(target, path, data) {
   }
   return target;
 }
-function apply(target, event, patch) {
-  const message = JSON.parse(event.data);
-  if (patch) Object.entries(message.data || {}).forEach(([field, value]) => { target = put(target, `${message.path}/${field}`, value); });
-  else target = put(target, message.path, message.data);
-  return target;
-}
-function update(event, patch) {
-  try {
-    cache = apply(cache, event, patch);
-    records = Object.entries(cache).map(([id, r]) => ({ ...r, _id: id })).filter(r => r && ['start', 'last', 'seconds', 'games', 'wins'].every(k => Number.isInteger(r[k])) && r.start >= 1577836800000 && r.last >= r.start && r.last - r.start <= 90000000 && r.seconds >= 0 && r.seconds <= 90000 && r.games >= 0 && r.games <= 1000 && r.wins >= 0 && r.wins <= 1000 && typeof r.active === 'boolean' && (r.detail === undefined || validDetail(r.detail, r)) && (r.app === undefined || r.app === 'sudoku') && (r.app !== 'sudoku' || Object.prototype.hasOwnProperty.call(levels, r.level) && typeof r.daily === 'boolean' && ['hints', 'mistakes'].every(k => Number.isInteger(r[k]) && r[k] >= 0 && r[k] <= 1000))).map(r => r.detail ? { ...r, detail: { ...r.detail, actions: r.detail.actions || {} } } : r);
-    connected = true; $('notice').textContent = ''; render();
-  } catch (_) { $('notice').textContent = 'Een update kon niet worden gelezen.'; }
-}
-function refresh() {
-  if (!validKey(key) || stream || document.hidden || !base) return;
-  const query = new URLSearchParams({ orderBy: '"start"', startAt: String(Date.now() - 90 * 86400000) });
-  // Load history once, then receive only changes. No repeated history downloads.
-  const source = stream = new EventSource(`${base}/sessions/${key}.json?${query}`);
-  source.addEventListener('put', event => { if (source === stream) update(event, false); });
-  source.addEventListener('patch', event => { if (source === stream) update(event, true); });
-  source.onerror = () => { if (source !== stream) return; connected = false; $('notice').textContent = 'Geen verbinding. We proberen het zo weer.'; render(); };
-  const denied = () => {
-    if (source !== stream) return;
-    source.close(); stream = null; connected = false;
-    $('notice').textContent = 'De database staat dit overzicht nog niet toe. Controleer de Firebase-regels.'; render();
-  };
-  source.addEventListener('cancel', denied);
-  source.addEventListener('auth_revoked', denied);
+function apply(target, ev, patch) {
+  const msg = JSON.parse(ev.data);
+  if (patch) { for (const [f, v] of Object.entries(msg.data || {})) target = put(target, `${msg.path}/${f}`, v); return target; }
+  return put(target, msg.path, msg.data);
 }
 function loadPlayers() {
-  if (directory || document.hidden || !base) return;
-  const source = directory = new EventSource(`${base}/players.json`);
-  for (const kind of ['put', 'patch']) source.addEventListener(kind, event => {
-    if (directory !== source) return;
-    try { players = apply(players, event, kind === 'patch'); directoryLoaded = true; $('notice').textContent = ''; fillPicker(); }
-    catch (_) { $('notice').textContent = 'De spelerslijst kon niet worden gelezen.'; }
+  if (S.directory || document.hidden || !base) return;
+  const src = S.directory = new EventSource(`${base}/players.json`);
+  for (const kind of ['put', 'patch']) src.addEventListener(kind, ev => {
+    if (S.directory !== src) return;
+    try { S.players = apply(S.players, ev, kind === 'patch'); S.loaded = true; regroup(); }
+    catch (_) { note('De spelerslijst kon niet worden gelezen.'); }
   });
-  source.onerror = () => { if (directory === source) $('notice').textContent = 'Spelerslijst tijdelijk niet bereikbaar. We proberen het zo weer.'; };
-  const denied = () => {
-    if (directory !== source) return;
-    source.close(); directory = null;
-    $('notice').textContent = 'De spelerslijst is nog niet toegankelijk. Controleer de Firebase-regels.';
-    if (!key) $('status').textContent = 'Spelerslijst niet beschikbaar';
-  };
-  source.addEventListener('cancel', denied); source.addEventListener('auth_revoked', denied);
+  src.onerror = () => { if (S.directory === src) note('Spelerslijst even niet bereikbaar. We proberen het zo weer.'); };
+  const denied = () => { if (S.directory !== src) return; src.close(); S.directory = null; note('De spelerslijst is niet toegankelijk. Controleer de Firebase-regels.'); };
+  src.addEventListener('cancel', denied); src.addEventListener('auth_revoked', denied);
 }
-if (!base) { $('notice').textContent = 'De aparte Firebase-database voor Patience is nog niet ingesteld.'; $('status').textContent = 'Nog niet ingesteld'; }
-else { if (key) { fillPicker(); choose(key); } loadPlayers(); setInterval(() => { if (key) render(); }, 10000); }
+function regroup() {
+  S.groups = people(S.players);
+  const current = wanted && groupOf(wanted);
+  if (current) select(current.gid);
+  else if (wanted) selectKey(wanted);
+  else {
+    const list = [...S.groups.values()];
+    const opa = list.find(g => /^opa$/i.test(g.name)) || list.find(g => g.name) || list[0];
+    if (opa) select(opa.gid); else render();
+  }
+  fillPicker();
+}
+
+/* ================= rendering ================= */
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+function fillPicker() {
+  const pick = $('who');
+  pick.replaceChildren();
+  const list = [...S.groups.values()].filter(g => g.name || g.gid === S.gid || S.showAll);
+  list.sort((a, b) => (b.name ? 1 : 0) - (a.name ? 1 : 0) || a.label.localeCompare(b.label, 'nl'));
+  for (const g of list) { const o = el('option', null, g.label + (g.keys.length > 1 ? ` (${g.keys.length} apparaten)` : '')); o.value = g.gid; pick.appendChild(o); }
+  if (!list.length) { const o = el('option', null, S.loaded ? 'Nog geen spelers' : 'Spelers laden…'); pick.appendChild(o); }
+  pick.value = S.gid || ''; pick.disabled = !list.length;
+  const unnamed = [...S.groups.values()].filter(g => !g.name).length;
+  $('moreDevices').hidden = !unnamed;
+  $('moreDevices').textContent = S.showAll ? 'Alleen spelers met een naam' : `Apparaten zonder naam tonen (${unnamed})`;
+}
+function setSeg(id, value) { for (const b of $(id).children) b.setAttribute?.('aria-pressed', String(b.dataset?.v === String(value))); }
+function render() {
+  const now = Date.now();
+  const g = S.groups.get(S.gid);
+  setSeg('gameSeg', S.game); setSeg('periodSeg', S.period);
+  if (!g) { $('who-name').textContent = S.loaded ? 'Nog geen spelers' : 'Laden…'; $('statusText').textContent = base ? 'Verbinden…' : 'Database niet ingesteld'; return; }
+  const all = [];
+  for (const key of S.keys) {
+    const dev = g.devices.find(d => d.id === key);
+    all.push(...sanitize(S.caches.get(key), key, dev ? dev.device : 'Apparaat'));
+  }
+  const s = summarize(all, S.game, S.period, now);
+  const connected = S.keys.some(k => S.connected.has(k));
+  $('who-name').textContent = g.label;
+  document.title = `${g.label} · speeloverzicht`;
+  // status line
+  const live = connected ? s.live : null;
+  $('status').classList.toggle('live', !!live);
+  $('statusText').textContent = !connected ? 'Geen verbinding met de database' : live
+    ? `Speelt nu ${live.app === 'sudoku' ? 'Sudoku' + (live.level?.played ? ' · level ' + live.level.played : live.daily ? ' · dagelijkse uitdaging' : '') : 'Patience'}`
+    : s.latest ? `Laatst gespeeld ${when(s.latest.last)} (${s.latest.app === 'sudoku' ? 'Sudoku' : 'Patience'})` : 'Nog niet gespeeld';
+  // hero figures
+  $('figLevel').textContent = s.level ?? '–';
+  $('figLevelSub').textContent = s.level == null ? (all.some(r => r.app === 'sudoku') ? 'zichtbaar na de volgende Sudoku-ronde' : 'nog geen Sudoku gespeeld') : s.levelGain > 0 ? `+${s.levelGain} deze week` : 'deze week gelijk gebleven';
+  $('figLevelBox').hidden = S.game === 'patience';
+  $('figToday').textContent = minutes(s.today);
+  $('figWeek').textContent = minutes(s.weekTotal);
+  $('figWeekSub').textContent = `${plural(s.sudoku.wins + s.patience.wins, 'spel', 'spellen')} uitgespeeld`;
+  renderGames(s);
+  renderWeek(s);
+  renderLevel(s);
+  renderHeat(s);
+  renderSignals(signals(s, appFilter(all, S.game), now));
+  renderHistory(s, now);
+  renderDevices(g);
+  $('periodLabel').textContent = `${S.period} dagen`;
+}
+function renderGames(s) {
+  const tile = (id, app, info) => {
+    const t = $(id); t.hidden = S.game !== 'all' && S.game !== app;
+    $(id + 'Time').textContent = minutes(info.seconds);
+    $(id + 'Wins').textContent = info.wins;
+    $(id + 'Games').textContent = info.games;
+    if (app === 'sudoku') { $(id + 'Hints').textContent = info.hints; $(id + 'Mistakes').textContent = info.mistakes; }
+    $(id + 'Empty').hidden = info.any;
+  };
+  tile('tileSudoku', 'sudoku', s.sudoku);
+  tile('tilePatience', 'patience', s.patience);
+}
+function renderWeek(s) {
+  const days = s.week, W = chartWidth('weekChart'), H = 220, top = 26, bottom = 34, gap = W < 500 ? 8 : 18;
+  const max = Math.max(1800, ...days.map(d => (s.perDay.get(d)?.patience || 0) + (s.perDay.get(d)?.sudoku || 0)));
+  const bw = (W - gap * 8) / 7, scale = (H - top - bottom) / max;
+  let svg = '';
+  // a light guide every 30 minutes
+  const narrow = W < 440;
+  for (let m = 1800; m <= max; m += 1800) { const y = H - bottom - m * scale; svg += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" class="grid"/>`; }
+  days.forEach((d, i) => {
+    const x = gap + i * (bw + gap), p = s.perDay.get(d)?.patience || 0, q = s.perDay.get(d)?.sudoku || 0;
+    const show = app => S.game === 'all' || S.game === app;
+    let y = H - bottom;
+    for (const [app, v] of [['patience', p], ['sudoku', q]]) {
+      if (!show(app) || v <= 0) continue;
+      const h = Math.max(3, v * scale); y -= h;
+      svg += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="6" class="bar ${app}"/>`;
+    }
+    const total = (show('patience') ? p : 0) + (show('sudoku') ? q : 0);
+    if (total > 0) svg += `<text x="${x + bw / 2}" y="${y - 7}" class="val">${total < 60 ? '<1' : Math.round(total / 60)}</text>`;
+    const label = narrow ? weekdayFmt.format(noon(d)).replace('.', '') : shortDayFmt.format(noon(d)).replace('.', '');
+    svg += `<text x="${x + bw / 2}" y="${H - 12}" class="axis mid${i === 6 ? ' today' : ''}">${i === 6 ? (narrow ? 'nu' : 'vandaag') : label}</text>`;
+  });
+  $('weekChart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Speeltijd per dag, afgelopen 7 dagen">${svg}</svg>`;
+  $('weekLegend').hidden = S.game !== 'all';
+}
+// draw charts at their real size so the text stays readable on a phone
+const chartWidth = id => Math.max(300, Math.round($(id).clientWidth || 700));
+function renderLevel(s) {
+  const sec = $('levelSec'); sec.hidden = S.game === 'patience';
+  if (S.game === 'patience') return;
+  const days = s.days;
+  const pts = [];
+  let cur = null;
+  const known = [...s.levelByDay].sort((a, b) => a[0].localeCompare(b[0]));
+  const startKnown = known.filter(([d]) => d < days[0]).pop();
+  if (startKnown) cur = startKnown[1];
+  days.forEach((d, i) => { if (s.levelByDay.has(d)) cur = Math.max(cur || 0, s.levelByDay.get(d)); if (cur != null) pts.push([i, cur]); });
+  $('levelEmpty').hidden = pts.length > 0;
+  $('levelChart').hidden = !pts.length;
+  if (!pts.length) return;
+  const W = chartWidth('levelChart'), H = 200, L = 44, R = 16, T = 26, B = 30;
+  const lo = Math.max(1, Math.min(...pts.map(p => p[1])) - 2), hi = Math.max(...pts.map(p => p[1])) + 2;
+  const x = i => L + i * (W - L - R) / Math.max(1, days.length - 1), y = v => T + (hi - v) * (H - T - B) / Math.max(1, hi - lo);
+  let path = '', prev = null;
+  for (const [i, v] of pts) { path += prev == null ? `M${x(i)},${y(v)}` : `H${x(i)}V${y(v)}`; prev = v; }
+  const last = pts[pts.length - 1];
+  let svg = `<path d="${path}H${x(last[0])}V${H - B}H${x(pts[0][0])}Z" class="area"/><path d="${path}" class="line"/>`;
+  const ticks = [lo, Math.round((lo + hi) / 2), hi];
+  for (const t of ticks) svg += `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" class="grid"/><text x="${L - 8}" y="${y(t) + 4}" class="axis end">${t}</text>`;
+  svg += `<circle cx="${x(last[0])}" cy="${y(last[1])}" r="7" class="dot"/><text x="${x(last[0]) - 12}" y="${y(last[1]) - 12}" class="val end">level ${last[1]}</text>`;
+  const step = Math.ceil(days.length / 6);
+  days.forEach((d, i) => { if ((days.length - 1 - i) % step === 0) svg += `<text x="${x(i)}" y="${H - 8}" class="axis mid">${shortDayFmt.format(noon(d)).replace('.', '')}</text>`; });
+  $('levelChart').innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Sudoku-level per dag">${svg}</svg>`;
+}
+function renderHeat(s) {
+  const rows = Object.entries(s.heat), max = Math.max(1, ...rows.flatMap(([, v]) => v));
+  const box = $('heatmap'); box.replaceChildren();
+  box.appendChild(el('span'));
+  for (let h = 0; h < 24; h++) box.appendChild(el('span', 'hh', h % 3 === 0 ? String(h).padStart(2, '0') : ''));
+  let best = null;
+  for (const [day, vals] of rows) {
+    box.appendChild(el('span', 'hd', day));
+    vals.forEach((v, h) => {
+      const c = el('span', 'hc h' + (v > 0 ? Math.min(4, 1 + Math.floor(v / max * 3.999)) : 0));
+      c.title = `${day} ${String(h).padStart(2, '0')}:00 · ${minutes(v)}`;
+      box.appendChild(c);
+      if (!best || v > best.v) best = { v, day, h };
+    });
+  }
+  const total = rows.reduce((n, [, v]) => n + v.reduce((a, b) => a + b, 0), 0);
+  const hours = Array(24).fill(0); rows.forEach(([, v]) => v.forEach((n, h) => { hours[h] += n; }));
+  const part = h => h < 6 ? "'s nachts" : h < 12 ? "'s ochtends" : h < 18 ? "'s middags" : "'s avonds";
+  const parts = {}; hours.forEach((n, h) => { parts[part(h)] = (parts[part(h)] || 0) + n; });
+  const topPart = Object.entries(parts).sort((a, b) => b[1] - a[1])[0];
+  $('whenText').textContent = total ? `Speelt het meest ${topPart[0]}, vooral rond ${String(hours.indexOf(Math.max(...hours))).padStart(2, '0')}:00.` : 'Nog geen speeltijd in deze periode.';
+}
+function renderSignals(list) {
+  const box = $('signals'); box.replaceChildren();
+  for (const s of list) { const li = el('li', s.tone); li.textContent = s.text; box.appendChild(li); }
+}
+function attemptTitle(a) {
+  if (a.app === 'sudoku') return a.daily ? 'Sudoku · dagelijkse uitdaging' : a.level?.played ? `Sudoku · level ${a.level.played}` : 'Sudoku';
+  return 'Patience' + (a.cards ? ` · ${a.cards} ${a.cards === 1 ? 'kaart' : 'kaarten'}` : '');
+}
+function renderHistory(s, now) {
+  const box = $('history'); box.replaceChildren();
+  if (!s.history.length) { box.appendChild(el('p', 'empty', 'Nog geen speelmomenten in deze periode.')); return; }
+  for (const { day, list } of s.history) {
+    const det = el('details', 'day');
+    const dk = S.gid + ':' + day;
+    // the newest day starts open; after that only what he clicks open or closed is remembered
+    det.open = S.dayState.has(dk) ? S.dayState.get(dk) : day === s.history[0].day;
+    const sum = el('summary');
+    sum.addEventListener('click', () => S.dayState.set(dk, !det.open));
+    const t = el('span', 'dname', day === dayKey(now) ? 'Vandaag' : day === dayKey(now - DAY) ? 'Gisteren' : dateFmt.format(noon(day)));
+    const secs = list.reduce((n, a) => n + a.seconds, 0), won = list.filter(a => a.won).length;
+    const stats = el('span', 'dstats', `${minutes(secs)} · ${plural(list.length, 'spel', 'spellen')}${won ? ` · ${won} uitgespeeld` : ''}`);
+    sum.append(t, stats); det.appendChild(sum);
+    for (const a of list) {
+      const row = el('div', 'att ' + a.app);
+      const head = el('div', 'att-head');
+      head.append(el('span', 'att-time', timeFmt.format(a.start)), el('span', 'att-title', attemptTitle(a)), el('span', 'att-dur', minutes(a.seconds)));
+      const chips = el('div', 'chips');
+      const live = a.active && now >= a.last && now - a.last < LIVE_MS;
+      chips.appendChild(el('span', 'chip ' + (live ? 'live' : a.won ? 'won' : 'open'), live ? 'nu bezig' : a.won ? 'uitgespeeld' : a.progress != null ? `${a.progress}% klaar` : 'niet uitgespeeld'));
+      if (a.hints) chips.appendChild(el('span', 'chip', plural(a.hints, 'hint', 'hints')));
+      if (a.mistakes) chips.appendChild(el('span', 'chip warn', plural(a.mistakes, 'fout', 'fouten')));
+      if (a.app === 'sudoku' && a.level && !a.daily && a.won) chips.appendChild(el('span', 'chip gold', `naar level ${a.level.reached}`));
+      row.append(head, chips);
+      if (a.measured) {
+        const more = el('details', 'more');
+        const ak = S.gid + ':' + a.app + a.start;
+        more.open = S.openAttempts.has(ak);
+        const ms = el('summary', null, 'Meer');
+        ms.addEventListener('click', () => { if (more.open) S.openAttempts.delete(ak); else S.openAttempts.add(ak); });
+        more.appendChild(ms);
+        const acts = Object.entries(a.actions).filter(([, n]) => n > 0).map(([k, n]) => `${ACTIONS[k]} ${n}×`).join(' · ');
+        const stops = Object.entries(a.stops).map(([k, n]) => `${ENDINGS[k]} ${n}×`).join(' · ');
+        more.appendChild(el('p', null, `Van ${timeFmt.format(a.start)} tot ${timeFmt.format(a.last)}. ${a.reason && !live ? 'Gestopt: ' + (ENDINGS[a.reason] || 'onbekend').toLowerCase() + '.' : ''}`));
+        if (acts) more.appendChild(el('p', null, 'Wat hij deed: ' + acts + '.'));
+        if (stops) more.appendChild(el('p', null, 'Onderbrekingen: ' + stops + '.'));
+        row.appendChild(more);
+      }
+      det.appendChild(row);
+    }
+    box.appendChild(det);
+  }
+}
+const DEVICE_ICONS = {
+  iPhone: '<svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>',
+  iPad: '<svg viewBox="0 0 24 24"><rect x="4" y="2.5" width="16" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
+  Android: '<svg viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>',
+  Computer: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg>',
+};
+function renderDevices(g) {
+  const box = $('devices'); box.replaceChildren();
+  $('devicesTitle').textContent = g.name ? `Apparaten van ${g.name}` : 'Dit apparaat';
+  for (const d of g.devices) {
+    const recs = sanitize(S.caches.get(d.id), d.id, d.device);
+    const apps = [...new Set(recs.map(r => r.app === 'sudoku' ? 'Sudoku' : 'Patience'))];
+    const row = el('form', 'dev');
+    const ic = el('span', 'dev-ic'); ic.innerHTML = DEVICE_ICONS[d.device] || DEVICE_ICONS.iPhone; row.append(ic);
+    const txt = el('span', 'dev-txt');
+    txt.append(el('b', null, `${d.device} · ${d.id.slice(0, 4)}`), el('small', null, apps.length ? apps.join(' en ') : 'nog niets gespeeld in 90 dagen'));
+    const input = el('input'); input.value = d.name; input.maxLength = 40; input.placeholder = 'Naam'; input.setAttribute?.('aria-label', 'Naam voor dit apparaat');
+    const btn = el('button', null, 'Bewaar'); btn.type = 'submit';
+    const msg = el('small', 'dev-msg', '');
+    row.append(txt, input, btn, msg);
+    row.onsubmit = async e => { e.preventDefault(); await rename(d.id, input.value, msg, btn); };
+    box.appendChild(row);
+  }
+}
+async function rename(id, name, msg, btn) {
+  name = String(name || '').trim();
+  if (!validKey(id) || !name || name.length > 40) { msg.textContent = 'Vul een naam in.'; return; }
+  btn.disabled = true; msg.textContent = 'Opslaan…';
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 10000);
+  try {
+    const res = await fetch(`${base}/players/${id}.json`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }), signal: ctl.signal });
+    if (!res.ok) throw new Error('denied');
+    S.players[id] = Object.assign(S.players[id] || {}, { name });
+    msg.textContent = 'Opgeslagen.';
+    wanted = id; regroup();
+  } catch (_) { msg.textContent = 'Niet opgeslagen. Probeer het opnieuw.'; }
+  finally { clearTimeout(t); btn.disabled = false; }
+}
+
+/* ================= controls ================= */
+$('who').onchange = () => { const g = S.groups.get($('who').value); if (g) { wanted = g.keys[0]; select(g.gid); } };
+$('moreDevices').onclick = () => { S.showAll = !S.showAll; fillPicker(); };
+for (const [seg, set] of [['gameSeg', v => { S.game = v; remember('opa.dashboard.game', v); bookmark(); }], ['periodSeg', v => { S.period = Number(v); remember('opa.dashboard.period', v); }]]) {
+  $(seg).addEventListener('click', e => { const b = e.target.closest ? e.target.closest('button') : e.target; if (!b || !b.dataset || !b.dataset.v) return; set(b.dataset.v); render(); });
+}
+addEventListener('hashchange', () => { const k = location.hash.slice(1); if (validKey(k) && !S.keys.includes(k)) { wanted = k; const g = groupOf(k); if (g) select(g.gid); else selectKey(k); fillPicker(); } });
+let resizeT = 0;
+addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(render, 150); });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (stream) stream.close(); stream = null; connected = false;
-    if (directory) directory.close(); directory = null;
-    if (key) render();
-  } else { refresh(); loadPlayers(); }
+  if (document.hidden) { closeAll(); render(); }
+  else { open(); loadPlayers(); }
 });
+
+/* ================= start ================= */
+if (!base) { note('De database voor het speeloverzicht is nog niet ingesteld.'); render(); }
+else {
+  if (wanted) selectKey(wanted);
+  loadPlayers();
+  setInterval(render, 15000);
+}
+window.OpaDashboard = { sanitize, people, summarize, parseLevel, signals, state: S };
 })();

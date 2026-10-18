@@ -26,6 +26,14 @@ De klassieke kaartafbeeldingen (map `cards/`) komen uit *Vector Playing Cards* v
 
 Bij een nieuwe versie: verhoog `VERSION` in `game.js` én `version.json` (de test controleert dat ze gelijk zijn), en `CACHE` in `sw.js` en `?v=` in `index.html`. Een app die openstaat kijkt elke paar minuten, en meteen als hij weer op het scherm komt, naar `version.json`. Is er een nieuwere versie, dan herlaadt hij vanzelf op een rustig moment (geen menu open, niets in beweging, een paar seconden niet aangeraakt). Het spel loopt daarna gewoon verder.
 
+## Speeloverzicht (dashboard, oktober 2026)
+Het dashboard (`dash/`) is opnieuw opgebouwd rond één vraag: hoe gaat het met opa?
+- Bovenaan: wie, of hij nu speelt (en wat), zijn **Sudoku-level**, speeltijd vandaag en de afgelopen 7 dagen.
+- Per spel deze week, speeltijd per dag (Sudoku en Patience samen), het Sudoku-level per dag, "Goed om te weten" (korte signalen zoals vaak 3 fouten of vastgelopen spellen), wanneer hij speelt en de speelmomenten per dag.
+- **Apparaten met dezelfde naam zijn één speler.** Op een iPhone heeft elke app op het beginscherm zijn eigen opslag, dus Patience en Sudoku krijgen elk een eigen apparaatcode. Geef ze in het dashboard dezelfde naam (hoofdletters maken niet uit) en ze worden samen getoond. Een andere naam geven splitst ze weer.
+- Het Sudoku-level komt uit `detail.mode` van Sudoku-records: `L37|38` = speelt level 37, heeft tot 38 vrijgespeeld (`D|38` dagelijkse uitdaging). Dat veld bestond al in de regels, dus de Firebase-regels hoeven niet te veranderen. Oudere Sudoku-records hebben dit nog niet.
+- Namen uit de database worden altijd als tekst getoond, nooit als HTML. Alle records worden gecontroleerd voordat ze meetellen.
+
 ## Speeltijd voor de familie
 
 Patience gebruikt een **eigen** Firebase Realtime Database (`patience-opa`, België), los van Mahjong. Sudoku gebruikt dezelfde database en hetzelfde online familieoverzicht.
