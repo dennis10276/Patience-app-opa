@@ -85,7 +85,7 @@ test('time from both apps on one phone adds up, and the level and live status sh
   a.streams.find(s => s.url.endsWith('/players.json')).emit('put', { path: '/', data: { [A]: { device: 'iPhone', name: 'Opa' }, [B]: { device: 'iPhone', name: 'OPa' } } });
   const now = a.now;
   const live = sudoku(now, { active: true, wins: 1, start: now - 1200000, seconds: 1200 });
-  live.detail = detail(live, { reason: 'playing', ended: undefined, mode: 'L37|38' });
+  live.detail = detail(live, { reason: 'playing', ended: undefined, mode: 'L37|38', build: 'sudoku-14' });
   delete live.detail.ended;
   a.stream('/sessions/' + A).emit('put', { path: '/', data: { p: rec(now - 3600000, { seconds: 900 }) } });
   a.stream('/sessions/' + B).emit('put', { path: '/', data: { s: live } });
@@ -94,6 +94,16 @@ test('time from both apps on one phone adds up, and the level and live status sh
   assert.match(a.text('statusText'), /Speelt nu Sudoku · level 37/);
   a.advance(80000);
   assert.match(a.text('statusText'), /^Laatst gespeeld vandaag/);
+});
+
+test('Sudoku levels from before the new level list (build 13 and older) are ignored', () => {
+  const a = dashboard('#' + A);
+  a.streams.find(s => s.url.endsWith('/players.json')).emit('put', { path: '/', data: { [A]: { device: 'iPhone', name: 'Opa' } } });
+  const now = a.now;
+  const old = sudoku(now - 7200000, { wins: 1 }); old.detail = detail(old, { mode: 'L40|41', build: 'sudoku-13' });
+  const fresh = sudoku(now - 3600000, { wins: 1 }); fresh.detail = detail(fresh, { mode: 'L2|3', build: 'sudoku-14' });
+  a.stream('/sessions/' + A).emit('put', { path: '/', data: { o: old, f: fresh } });
+  assert.equal(a.text('figLevel'), 3);
 });
 
 test('the game filter keeps the apps apart', () => {

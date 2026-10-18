@@ -54,6 +54,9 @@ function validDetail(d, r) {
   }
   return true;
 }
+// Sudoku got a new level list in build sudoku-14 and everyone started again at level 1; older levels are ignored.
+const NEW_LEVELS_BUILD = 14;
+function sudokuBuild(b) { const m = typeof b === 'string' && /^sudoku-(\d+)$/.exec(b); return m ? Number(m[1]) : 0; }
 // "L37|38" = playing level 37, unlocked up to 38; "D|38" daily challenge; "O|38" old puzzle.
 function parseLevel(mode) {
   const m = typeof mode === 'string' && /^(?:L(\d{1,5})|D|O)\|(\d{1,5})$/.exec(mode);
@@ -79,7 +82,7 @@ function sanitize(raw, key, device) {
       hints: app === 'sudoku' ? r.hints : (detail?.actions.hint || 0),
       mistakes: app === 'sudoku' ? r.mistakes : 0,
       daily: app === 'sudoku' && r.daily,
-      level: app === 'sudoku' ? parseLevel(detail?.mode) : null,
+      level: app === 'sudoku' && sudokuBuild(detail?.build) >= NEW_LEVELS_BUILD ? parseLevel(detail?.mode) : null,
       cards: app === 'patience' && detail?.mode ? (detail.mode.endsWith('3') ? 3 : 1) : null,
       detail,
     });
